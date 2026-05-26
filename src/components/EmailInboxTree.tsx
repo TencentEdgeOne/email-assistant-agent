@@ -8,6 +8,7 @@
  * ClassifiedEmail (built up incrementally as state_update frames stream
  * in from the backend) and renders them grouped + sorted by priority.
  */
+import { useMemo, useState } from 'react';
 import { ClassifiedEmail, EmailCategory } from '../types';
 import { tokens } from '../design-tokens';
 import { Icon, IconName } from '../icons';
@@ -37,6 +38,8 @@ interface Props {
    * Hidden when the email is already done or currently under review.
    */
   onProcessSingle?: (emailId: string) => void;
+  /** Opens the EmailDetailDrawer for the clicked email row. */
+  onSelectEmail?: (emailId: string) => void;
   /** Disables the per-row action button (e.g. while a run is in flight). */
   actionsDisabled?: boolean;
 }
@@ -97,6 +100,7 @@ export default function EmailInboxTree({
   fetchedCount,
   classifying,
   onProcessSingle,
+  onSelectEmail,
   actionsDisabled,
 }: Props) {
   if (emails.length === 0) {
@@ -132,7 +136,34 @@ export default function EmailInboxTree({
     );
   }
 
-  const grouped = groupByCategory(emails);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<EmailCategory | ''>('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'done'>('all');
+
+  // Client-side filtering: AND combination of search + category + status.
+  const filtered = useMemo(() => {
+    let list = emails;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (c) =>
+          (c.email.subject || '').toLowerCase().includes(q) ||
+          (c.email.from_ || c.email.from || '').toLowerCase().includes(q),
+      );
+    }
+    if (categoryFilter) {
+      list = list.filter((c) => c.category === categoryFilter);
+    }
+    if (statusFilter === 'done') {
+      list = list.filter((c) => doneEmailIds?.has(c.email.id));
+    } else if (statusFilter === 'pending') {
+      list = list.filter((c) => !doneEmailIds?.has(c.email.id));
+    }
+    return list;
+  }, [emails, searchQuery, categoryFilter, statusFilter, doneEmailIds]);
+
+  const grouped = groupByCategory(filtered);
 
   return (
     <aside style={shell}>
@@ -140,7 +171,73 @@ export default function EmailInboxTree({
         <Icon name="inbox" size={14} />
         <span>收件箱</span>
         <span style={countBadge}>{emails.length}</span>
+        <button
+          type="button"
+          onClick={() => setFilterOpen((v) => !v)}
+          style={{
+            ...filterToggleBtn,
+            color: filterOpen ? tokens.color.brand : tokens.color.textMuted,
+            background: filterOpen ? tokens.color.brandSoft : 'transparent',
+            borderColor: filterOpen ? tokens.color.brandBorder : tokens.color.border,
+          }}
+          title="展开/收起筛选"
+          aria-pressed={filterOpen}
+        >
+          <Icon name="search" size={12} />
+        </button>
       </h2>
+      {filterOpen && (
+        <div style={filterPanel}>
+          <div style={searchRow}>
+            <Icon name="search" size={12} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索主题/发件人..."
+              style={searchInput}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                style={clearBtn}
+                title="清空搜索"
+              >
+                <Icon name="x" size={10} strokeWidth={2.5} />
+              </button>
+            )}
+          </div>
+          <div style={filterRow}>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value as EmailCategory | '')}
+              style={filterSelect}
+            >
+              <option value="">全部类别</option>
+              {CATEGORY_ORDER.map((cat) => (
+                <option key={cat} value={cat}>
+                  {CATEGORY_LABEL[cat]}
+                </option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | 'pending' | 'done')}
+              style={filterSelect}
+            >
+              <option value="all">全部状态</option>
+              <option value="pending">待处理</option>
+              <option value="done">已处理</option>
+            </select>
+          </div>
+          {filtered.length !== emails.length && (
+            <div style={filterResult}>
+              显示 {filtered.length} / {emails.length} 封
+            </div>
+          )}
+        </div>
+      )}
       {refreshing && (
         <div style={refreshBanner} title="新任务正在重新拉取并分类邮件,完成后会刷新这里">
           <span style={refreshDot} /> 正在重新拉取...
@@ -155,6 +252,7 @@ export default function EmailInboxTree({
             activeEmailId={activeEmailId}
             doneEmailIds={doneEmailIds}
             onProcessSingle={onProcessSingle}
+            onSelectEmail={onSelectEmail}
             actionsDisabled={actionsDisabled}
           />
         ))}
@@ -169,6 +267,7 @@ function CategoryGroup({
   activeEmailId,
   doneEmailIds,
   onProcessSingle,
+  onSelectEmail,
   actionsDisabled,
 }: {
   category: EmailCategory;
@@ -176,6 +275,7 @@ function CategoryGroup({
   activeEmailId?: string | null;
   doneEmailIds?: ReadonlySet<string>;
   onProcessSingle?: (emailId: string) => void;
+  onSelectEmail?: (emailId: string) => void;
   actionsDisabled?: boolean;
 }) {
   const sorted = [...emails].sort((a, b) => b.priority - a.priority);
@@ -194,6 +294,7 @@ function CategoryGroup({
             isActive={c.email.id === activeEmailId}
             isDone={!!doneEmailIds?.has(c.email.id)}
             onProcess={onProcessSingle}
+            onSelect={onSelectEmail}
             actionsDisabled={actionsDisabled}
           />
         ))}
@@ -207,12 +308,14 @@ function EmailRow({
   isActive,
   isDone,
   onProcess,
+  onSelect,
   actionsDisabled,
 }: {
   classified: ClassifiedEmail;
   isActive: boolean;
   isDone: boolean;
   onProcess?: (emailId: string) => void;
+  onSelect?: (emailId: string) => void;
   actionsDisabled?: boolean;
 }) {
   const senderRaw = classified.email.from || classified.email.from_ || '';
@@ -228,8 +331,10 @@ function EmailRow({
   return (
     <li
       title={classified.reason || classified.email.subject}
+      onClick={() => onSelect?.(classified.email.id)}
       style={{
         ...row,
+        cursor: onSelect ? 'pointer' : undefined,
         background: isActive
           ? tokens.color.brandSoft
           : isDone
@@ -561,4 +666,90 @@ const processBtn: React.CSSProperties = {
   whiteSpace: 'nowrap',
   flexShrink: 0,
   lineHeight: 1.2,
+};
+
+// ─── Filter panel styles ─────────────────────────────────────────────────────
+
+const filterToggleBtn: React.CSSProperties = {
+  marginLeft: 'auto',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 24,
+  height: 24,
+  borderRadius: tokens.radius.sm,
+  border: '1px solid',
+  cursor: 'pointer',
+  flexShrink: 0,
+  transition: tokens.motion.fast,
+};
+
+const filterPanel: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: tokens.space[2],
+  padding: `${tokens.space[2]}px ${tokens.space[3]}px`,
+  background: tokens.color.surface,
+  borderBottom: `1px solid ${tokens.color.border}`,
+};
+
+const searchRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: `4px ${tokens.space[2]}px`,
+  background: tokens.color.bg,
+  border: `1px solid ${tokens.color.border}`,
+  borderRadius: tokens.radius.md,
+  color: tokens.color.textSubtle,
+};
+
+const searchInput: React.CSSProperties = {
+  flex: 1,
+  border: 'none',
+  outline: 'none',
+  background: 'transparent',
+  fontSize: tokens.fontSize.sm,
+  color: tokens.color.text,
+  fontFamily: tokens.font.sans,
+  minWidth: 0,
+};
+
+const clearBtn: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 18,
+  height: 18,
+  borderRadius: '50%',
+  border: 'none',
+  background: tokens.color.surfaceHover,
+  color: tokens.color.textMuted,
+  cursor: 'pointer',
+  flexShrink: 0,
+};
+
+const filterRow: React.CSSProperties = {
+  display: 'flex',
+  gap: tokens.space[2],
+};
+
+const filterSelect: React.CSSProperties = {
+  flex: 1,
+  padding: '4px 8px',
+  fontSize: tokens.fontSize.xs,
+  fontFamily: tokens.font.mono,
+  color: tokens.color.text,
+  background: tokens.color.bg,
+  border: `1px solid ${tokens.color.border}`,
+  borderRadius: tokens.radius.sm,
+  cursor: 'pointer',
+  minWidth: 0,
+};
+
+const filterResult: React.CSSProperties = {
+  fontSize: tokens.fontSize.xs,
+  fontFamily: tokens.font.mono,
+  color: tokens.color.textSubtle,
+  textAlign: 'center',
 };

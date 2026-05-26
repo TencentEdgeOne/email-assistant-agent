@@ -21,6 +21,7 @@ import ConversationStream, {
   StreamMessage,
   StreamMessageKind,
 } from './components/ConversationStream';
+import EmailDetailDrawer from './components/EmailDetailDrawer';
 import EmailInboxTree from './components/EmailInboxTree';
 import HistorySidebar from './components/HistorySidebar';
 import NodeFlowVisualizer from './components/NodeFlowVisualizer';
@@ -166,6 +167,7 @@ type PipelineAction =
   | { type: 'decision'; emailId: string }
   | { type: 'regenerate'; emailId: string }
   | { type: 'error' }
+  | { type: 'stop' }
   /** Hydrate the inbox + done markers from a restored conversation snapshot.
    * Used when the user clicks a row in HistorySidebar — we drop the run-level
    * counters back to 0 (no run is in flight) but keep the persisted classified
@@ -378,6 +380,18 @@ function pipelineReducer(state: PipelineState, action: PipelineAction): Pipeline
         ...state,
         nodeStatuses: { ...state.nodeStatuses, ...errorStuckNode(state.nodeStatuses) },
       };
+    case 'stop':
+      // User clicked stop — clear all "in-flight" visuals: active/paused
+      // nodes revert to pending, active email highlight clears.
+      return {
+        ...state,
+        activeEmailId: null,
+        nodeStatuses: Object.fromEntries(
+          Object.entries(state.nodeStatuses).map(([k, v]) =>
+            v === 'active' || v === 'paused' ? [k, 'pending'] : [k, v],
+          ),
+        ) as Partial<Record<PipelineNode, NodeStatus>>,
+      };
     case 'restore': {
       // Wipe to a clean slate but keep the snapshot fields the user expects
       // to still see when they click a past conversation in HistorySidebar.
@@ -483,6 +497,20 @@ export default function App() {
     phase: 'summarize' | 'draft';
     text: string;
   } | null>(null);
+  /** Which email's detail drawer is open (null = closed). Set when the user
+   * clicks an email row in the left column; cleared on close / Esc / backdrop. */
+  const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  /** AbortController for the current streaming fetch (run / review). Aborting
+   * this immediately terminates the client-side SSE connection. The server-side
+   * `/stop` endpoint is a courtesy notification that also sets request.signal
+   * on the backend handler, but the client abort is what gives instant UX. */
+  const abortControllerRef = useRef<AbortController | null>(null);
+  /** Accumulated draft outputs keyed by email_id. Populated from state_update
+   * events (draft node emits ``pending_review``) and when the user submits an
+   * "edit" decision (we store the final version). Used by EmailDetailDrawer to
+   * show the draft for any email the user clicks — even after the HITL card
+   * has been dismissed and we've moved on to the next email. */
+  const [draftsMap, setDraftsMap] = useState<Map<string, DraftItem>>(new Map());
 
   const addMessage = useCallback((msg: Omit<StreamMessage, 'id' | 'ts'>) => {
     setMessages((prev) => [
@@ -538,6 +566,32 @@ export default function App() {
         // Skip the LangGraph-internal __interrupt__ event — handled via human_review_required
         if ('__interrupt__' in payload) return;
         dispatchPipeline({ type: 'state_update', payload });
+
+        // ─── Draft accumulation for EmailDetailDrawer ─────────────────
+        // The draft node emits ``pending_review`` (current draft); store it
+        // keyed by email_id so the drawer can show it when the user clicks
+        // an already-processed row. Apply node may also emit updated drafts
+        // (after "edit" action), so check both.
+        for (const patch of Object.values(payload)) {
+          if (patch && typeof patch === 'object') {
+            const p = patch as Record<string, unknown>;
+            if (p.pending_review && typeof p.pending_review === 'object') {
+              const d = p.pending_review as DraftItem;
+              if (d.email_id) {
+                setDraftsMap((prev) => new Map(prev).set(d.email_id, d));
+              }
+            }
+            // drafts array (from apply with edited body)
+            if (Array.isArray(p.drafts)) {
+              for (const item of p.drafts) {
+                if (item && typeof item === 'object' && (item as DraftItem).email_id) {
+                  const d = item as DraftItem;
+                  setDraftsMap((prev) => new Map(prev).set(d.email_id, d));
+                }
+              }
+            }
+          }
+        }
 
         // Surface backend-side warnings/errors from any node patch's
         // ``errors`` field — e.g. prioritize tells us "target email not in
@@ -678,6 +732,9 @@ export default function App() {
       const cid = conversationIdRef.current;
       taskRef.current = task;
       summaryEmittedRef.current = false;
+      // Clear the "was stopped" flag so re-running this conversation
+      // correctly restores HITL state if the user refreshes mid-review.
+      try { window.localStorage.removeItem(`email-stop-${cid}`); } catch { /* noop */ }
       // doneEmailIdsRef is the synchronous mirror of doneEmailIds — clear it
       // ONLY on a force refresh; otherwise we want the per-session "✓ done"
       // state to accumulate across multi-step single_reply clicks.
@@ -722,6 +779,10 @@ export default function App() {
       });
 
       try {
+        // Create a fresh AbortController for this streaming request so the
+        // stop button can terminate it immediately via controller.abort().
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
         for await (const frame of runEmailAssistant({
           task,
           conversationId: cid,
@@ -729,12 +790,17 @@ export default function App() {
           targetEmailId: opts?.targetEmailId,
           skipEmailIds: skipIds,
           forceRefresh: opts?.forceRefresh,
+          signal: controller.signal,
         })) {
           handleFrame(frame);
         }
       } catch (e) {
-        addMessage({ kind: 'error', text: (e as Error).message });
+        // AbortError is expected when the user clicks stop — don't surface it.
+        if ((e as Error).name !== 'AbortError') {
+          addMessage({ kind: 'error', text: (e as Error).message });
+        }
       } finally {
+        abortControllerRef.current = null;
         setRunning(false);
         // New conversation entry (or updated metadata) should appear in the
         // sidebar — bump the refresh key.
@@ -751,22 +817,41 @@ export default function App() {
 
   /** Send a stop signal to the backend for the active conversation. The
    * SSE generator notices via ``request.signal`` on its next iteration and
-   * exits cleanly; the user sees a "已取消" entry land in the timeline. */
+   * exits cleanly. Also aborts the client-side fetch immediately so the UI
+   * stops receiving frames without waiting for the server round-trip. */
   const stopCurrentRun = useCallback(async () => {
     const cid = conversationIdRef.current;
     if (!cid) return;
+
+    // 1. Client-side abort — instantly terminates the streaming fetch.
+    // The for-await loop in startRun / submitDecision catches AbortError
+    // and exits cleanly.
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+
+    // 2. Server-side notification — fire-and-forget, sets request.signal
+    // on the backend handler so it cleans up on its next iteration.
     try {
-      const res = await apiStopRun(cid);
-      addMessage({
-        kind: 'system',
-        text:
-          res.status === 'aborted'
-            ? '⏹ 已发送停止信号 — 后端会在下一个节点边界退出'
-            : '⏹ 没有正在运行的任务可以停止',
-      });
-    } catch (e) {
-      addMessage({ kind: 'error', text: `停止失败: ${(e as Error).message}` });
+      await apiStopRun(cid);
+    } catch {
+      // Ignore — the client abort already did the job.
     }
+
+    // 3. Mark this conversation as "user-stopped" so restoreSession won't
+    // resurrect the HITL card on refresh. The LangGraph checkpoint still
+    // holds the interrupt, but the user's intent was to abandon it.
+    try {
+      window.localStorage.setItem(`email-stop-${cid}`, '1');
+    } catch { /* noop */ }
+
+    setPending(null);
+    // Reset pipeline visuals: active/paused nodes revert to pending,
+    // active email highlight in the left column clears.
+    dispatchPipeline({ type: 'stop' });
+    addMessage({ kind: 'system', text: '⏹ 已停止' });
+    setRunning(false);
+    setProgress(null);
+    setStreamingText(null);
   }, [addMessage]);
 
   /** Generate a fresh conversation_id and reset all state. The previous
@@ -809,6 +894,18 @@ export default function App() {
       if (running) return; // never swap mid-run
       if (!id) return;
       setRestoring(true);
+      // Immediately clear the old session's visual state so the user doesn't
+      // see stale messages from the previous conversation while the network
+      // request is in flight. Without this, closing the history drawer would
+      // show the OLD session for ~200ms until getConversation resolves.
+      setMessages([]);
+      setPending(null);
+      setProgress(null);
+      setStreamingText(null);
+      setSelectedEmailId(null);
+      // Close the sidebar early so the user sees the transition (loading
+      // state in the center) immediately instead of waiting for the fetch.
+      setHistoryOpen(false);
       try {
         const detail = await getConversation(id);
         conversationIdRef.current = id;
@@ -834,6 +931,22 @@ export default function App() {
           );
           doneEmailIdsRef.current = new Set(doneIds);
 
+          // Restore accumulated drafts so the Drawer can show them
+          // after page refresh without re-running the pipeline.
+          const stateDrafts =
+            (detail.state.drafts as DraftItem[] | undefined) ?? [];
+          if (stateDrafts.length > 0) {
+            const restored = new Map<string, DraftItem>();
+            for (const d of stateDrafts) {
+              if (d && d.email_id) {
+                restored.set(d.email_id, d);
+              }
+            }
+            setDraftsMap(restored);
+          } else {
+            setDraftsMap(new Map());
+          }
+
           // ── HITL resume detection ──
           // The graph is paused at an interrupt() iff:
           //   - LangGraph snapshot's ``next`` contains 'review' (the
@@ -850,9 +963,20 @@ export default function App() {
             | null
             | undefined;
 
+          // If the user previously clicked "stop" on this conversation,
+          // don't resurrect the HITL card — they intentionally abandoned it.
+          // The LangGraph checkpoint still holds the interrupt but the user's
+          // intent was "I'm done with this run". Clear the flag on next
+          // startRun so re-running the same conversation works normally.
+          let wasStopped = false;
+          try {
+            wasStopped = !!window.localStorage.getItem(`email-stop-${id}`);
+          } catch { /* noop */ }
+
           if (
             pausedAtReview &&
             pendingDraft &&
+            !wasStopped &&
             typeof pendingDraft === 'object' &&
             typeof pendingDraft.email_id === 'string'
           ) {
@@ -922,7 +1046,6 @@ export default function App() {
         }
       } finally {
         setRestoring(false);
-        setHistoryOpen(false); // dismiss drawer once a row was picked
       }
     },
     [running, addMessage],
@@ -977,12 +1100,17 @@ export default function App() {
       setRunning(true);
 
       try {
-        for await (const frame of submitReview({ conversationId: cid, decision })) {
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        for await (const frame of submitReview({ conversationId: cid, decision, signal: controller.signal })) {
           handleFrame(frame);
         }
       } catch (e) {
-        addMessage({ kind: 'error', text: (e as Error).message });
+        if ((e as Error).name !== 'AbortError') {
+          addMessage({ kind: 'error', text: (e as Error).message });
+        }
       } finally {
+        abortControllerRef.current = null;
         setRunning(false);
       }
     },
@@ -1061,22 +1189,18 @@ export default function App() {
               </button>
             )}
           </div>
-          {pipeline.scoresLocked && pipeline.classified.length > 0 && (
-            <>
-              <span style={toolbarDivider} aria-hidden />
-              <button
-                onClick={() =>
-                  startRun(taskRef.current ?? 'triage_only', { forceRefresh: true })
-                }
-                disabled={running || restoring || !initialized}
-                style={ghostBtn}
-                title="重新从邮箱拉取最新邮件并分类(放弃缓存)"
-              >
-                <Icon name="refresh-cw" size={13} />
-                <span>强制刷新</span>
-              </button>
-            </>
-          )}
+          <span style={toolbarDivider} aria-hidden />
+          <button
+            onClick={() =>
+              startRun(taskRef.current ?? 'triage_only', { forceRefresh: true })
+            }
+            disabled={running || restoring || !initialized}
+            style={ghostBtn}
+            title="重新从邮箱拉取最新邮件并分类(忽略缓存,重新拉取)"
+          >
+            <Icon name="refresh-cw" size={13} />
+            <span>重新拉取邮件</span>
+          </button>
           {/* New session + history toggle pinned to the right end of the
               toolbar so they sit next to the drawer that slides in from
               the right. ``marginLeft: auto`` on the first one pushes the
@@ -1114,33 +1238,46 @@ export default function App() {
       historyOpen={historyOpen}
       onCloseHistory={() => setHistoryOpen(false)}
       left={
-        <EmailInboxTree
-          emails={pipeline.classified}
-          activeEmailId={pipeline.activeEmailId}
-          doneEmailIds={pipeline.doneEmailIds}
-          // Banner only while we're ACTUALLY mid-fetch (i.e. fetch hasn't
-          // completed yet). Tying it to fetch's status — instead of the
-          // older "running && !scoresLocked" heuristic — means the banner
-          // doesn't linger throughout draft / review / apply / summarize.
-          // Cache hits flip fetch:done immediately, so the banner barely
-          // flashes for them. ✓
-          refreshing={
-            running &&
-            pipeline.nodeStatuses.fetch !== 'done' &&
-            pipeline.classified.length > 0
-          }
-          fetchedCount={pipeline.fetchedCount}
-          classifying={
-            // We've fetched but classify hasn't finished — show
-            // "已拉取 N 封,正在分类..." in the empty state instead of
-            // the placeholder onboarding text.
-            pipeline.nodeStatuses.fetch === 'done' &&
-            pipeline.nodeStatuses.classify !== 'done' &&
-            pipeline.fetchedCount > 0
-          }
-          onProcessSingle={processSingleEmail}
-          actionsDisabled={running}
-        />
+        <>
+          <EmailInboxTree
+            emails={pipeline.classified}
+            activeEmailId={pipeline.activeEmailId}
+            doneEmailIds={pipeline.doneEmailIds}
+            // Banner only while we're ACTUALLY mid-fetch (i.e. fetch hasn't
+            // completed yet). Tying it to fetch's status — instead of the
+            // older "running && !scoresLocked" heuristic — means the banner
+            // doesn't linger throughout draft / review / apply / summarize.
+            // Cache hits flip fetch:done immediately, so the banner barely
+            // flashes for them. ✓
+            refreshing={
+              running &&
+              pipeline.nodeStatuses.fetch !== 'done' &&
+              pipeline.classified.length > 0
+            }
+            fetchedCount={pipeline.fetchedCount}
+            classifying={
+              // We've fetched but classify hasn't finished — show
+              // "已拉取 N 封,正在分类..." in the empty state instead of
+              // the placeholder onboarding text.
+              pipeline.nodeStatuses.fetch === 'done' &&
+              pipeline.nodeStatuses.classify !== 'done' &&
+              pipeline.fetchedCount > 0
+            }
+            onProcessSingle={processSingleEmail}
+            onSelectEmail={setSelectedEmailId}
+            actionsDisabled={running}
+          />
+          <EmailDetailDrawer
+            email={
+              selectedEmailId
+                ? pipeline.classified.find((c) => c.email.id === selectedEmailId) ?? null
+                : null
+            }
+            draft={selectedEmailId ? draftsMap.get(selectedEmailId) ?? null : null}
+            isOpen={selectedEmailId !== null}
+            onClose={() => setSelectedEmailId(null)}
+          />
+        </>
       }
       center={
         initialized ? (

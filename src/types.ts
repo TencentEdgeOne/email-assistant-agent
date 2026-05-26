@@ -49,6 +49,7 @@ export interface Email {
   to: string[];
   subject: string;
   body_text?: string;
+  body_html?: string;
   received_at: string;
   thread_id: string | null;
   has_ics?: boolean;

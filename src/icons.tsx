@@ -55,7 +55,12 @@ export type IconName =
   | 'skip-forward'
   | 'siren'
   | 'archive'
-  | 'zap';
+  | 'zap'
+  | 'clipboard'
+  | 'search'
+  | 'eye'
+  | 'filter'
+  | 'chevron-down';
 
 // 24x24 viewBox path data, Lucide style. Use single quotes for clarity.
 const ICONS: Record<IconName, string> = {
@@ -110,6 +115,14 @@ const ICONS: Record<IconName, string> = {
   archive:
     '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
   zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  clipboard:
+    '<rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+  search:
+    '<circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/>',
+  eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  filter:
+    '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+  'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
 };
 
 export function Icon({

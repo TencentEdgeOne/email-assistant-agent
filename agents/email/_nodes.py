@@ -114,7 +114,7 @@ async def fetch(
     state: EmailAssistantState,
     *,
     provider,
-    lookback_hours: int = 24,
+    lookback_hours: int = 72,
 ) -> dict:
     """Pull the inbox snapshot from the provider.
 
@@ -145,7 +145,7 @@ async def fetch(
 
     rules = _bundle_from_rules(state.get("user_rules") or [])
     since = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-    raw_inbox = await provider.fetch_inbox(since=since, limit=100)
+    raw_inbox = await provider.fetch_inbox(since=since, limit=30)
 
     kept: list[Email] = []
     archived = 0

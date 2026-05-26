@@ -177,7 +177,7 @@ async def handler(context):
     # it's non-empty. Frontend sends this whenever it has a cached snapshot
     # AND the user did NOT click "force refresh".
     #
-    # Force-refresh path: when the user clicks "强制刷新" the frontend sends
+    # Force-refresh path: when the user clicks "重新拉取邮件" the frontend sends
     # ``force_refresh: true`` instead of a preloaded payload. We MUST then
     # explicitly clear the inbox-related state fields, otherwise LangGraph's
     # checkpointer happily preserves the stale ``classified`` from the prior

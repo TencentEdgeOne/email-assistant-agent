@@ -412,7 +412,13 @@ class IMAPProvider:
                 "stay on EMAIL_PROVIDER=mock for local dev."
             ) from exc
         cls = MailBox if self.use_ssl else MailBoxUnencrypted
+        print(
+            f"[IMAPProvider] connecting to {self.host}:{self.port} "
+            f"(ssl={self.use_ssl}, user={self.user})",
+            flush=True,
+        )
         box = cls(self.host, port=self.port).login(self.user, self.app_password)
+        print("[IMAPProvider] login OK", flush=True)
         return box
 
     async def _with_box(self, fn):
@@ -434,7 +440,14 @@ class IMAPProvider:
         self, since: Optional[datetime] = None, limit: int = 50
     ) -> list[Email]:
         """Read up to ``limit`` recent messages from INBOX, optionally
-        filtered to those received after ``since``."""
+        filtered to those received after ``since``.
+
+        Fallback: if the date filter returns 0 results (common when the user
+        just connected a test mailbox with no recent activity), retry WITHOUT
+        the date filter to grab the most recent ``limit`` messages regardless
+        of when they arrived. This prevents the confusing "configured IMAP
+        but inbox is empty" experience.
+        """
         from imap_tools import AND
 
         # imap_tools' date filter is day-level (IMAP SEARCH SINCE is too).
@@ -449,12 +462,49 @@ class IMAPProvider:
                 try:
                     results.append(_imap_msg_to_email(msg))
                     count += 1
-                except Exception:
-                    # Skip malformed messages rather than crash the whole pull
+                except Exception as exc:
+                    # Log but skip malformed messages
+                    print(f"[IMAPProvider] skipping message (parse error): {exc}", flush=True)
                     continue
             return results
 
-        return await self._with_box(_fetch)
+        results = await self._with_box(_fetch)
+        print(
+            f"[IMAPProvider] fetch_inbox: {len(results)} emails"
+            f" (since={since.isoformat() if since else 'none'}, limit={limit})",
+            flush=True,
+        )
+
+        # Fallback: if date filter returned nothing, retry without it.
+        # Common scenario: user just configured IMAP on a mailbox that hasn't
+        # received mail in the last few days. Without this fallback they'd see
+        # "今日无新邮件" and think their config is broken.
+        # Cap at 20 to avoid pulling thousands of old emails.
+        if not results and since is not None:
+            print(
+                "[IMAPProvider] date filter returned 0 results — retrying without date filter (max 20)",
+                flush=True,
+            )
+            fallback_criteria = AND(all=True)
+            fallback_limit = min(limit, 20)
+
+            def _fetch_all(box) -> list[Email]:
+                out: list[Email] = []
+                count = 0
+                for msg in box.fetch(fallback_criteria, mark_seen=False, headers_only=False, reverse=True):
+                    if count >= fallback_limit:
+                        break
+                    try:
+                        out.append(_imap_msg_to_email(msg))
+                        count += 1
+                    except Exception:
+                        continue
+                return out
+
+            results = await self._with_box(_fetch_all)
+            print(f"[IMAPProvider] fallback fetch: {len(results)} emails", flush=True)
+
+        return results
 
     async def save_draft(self, draft: DraftItem) -> str:
         """APPEND the draft to a Drafts folder. Returns an opaque draft id.
