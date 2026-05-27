@@ -186,13 +186,13 @@ function btn(bg: string, primary: boolean): React.CSSProperties {
 
 const shell: React.CSSProperties = {
   border: `1px solid ${tokens.color.brandBorder}`,
-  borderRadius: tokens.radius.lg,
-  padding: tokens.space[4],
+  borderRadius: tokens.radius.xl,
+  padding: tokens.space[5],
   background: tokens.color.bg,
-  boxShadow: tokens.shadow.focus,
+  boxShadow: tokens.shadow.md,
   display: 'flex',
   flexDirection: 'column',
-  gap: tokens.space[2],
+  gap: tokens.space[3],
 };
 
 const headerRow: React.CSSProperties = {

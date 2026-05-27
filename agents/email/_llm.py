@@ -32,7 +32,7 @@ REQUIRED_ENV = ("AI_GATEWAY_API_KEY", "AI_GATEWAY_BASE_URL")
 
 # Default model — keep aligned with sibling templates so the platform-wide
 # model strategy stays unified.
-DEFAULT_MODEL = "@Pages/deepseek-v4-flash"
+DEFAULT_MODEL = "@makers/deepseek-v4-flash"
 
 GATEWAY_HEADERS: dict[str, str] = {
     "X-Gateway-Quota-Bypass": "true",

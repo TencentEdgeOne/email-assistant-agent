@@ -27,11 +27,18 @@ import HistorySidebar from './components/HistorySidebar';
 import NodeFlowVisualizer from './components/NodeFlowVisualizer';
 import {
   getConversation,
+  invalidateConversationCache,
   runEmailAssistant,
   stopRun as apiStopRun,
   StoredMessage,
   submitReview,
 } from './api';
+import {
+  deriveTitleFromMessages,
+  getLocalConversations,
+  removeLocalConversation,
+  saveLocalConversation,
+} from './historyStorage';
 import { Icon, IconSpinner } from './icons';
 import type {
   ClassifiedEmail,
@@ -743,6 +750,11 @@ export default function App() {
       }
       checkpointWarningShownRef.current = false;
       setRunning(true);
+      // Persist (or refresh) the sidebar entry for this conversation. FWW
+      // semantics: the FIRST task on this cid wins as the title — re-running
+      // a different task on the same cid only bumps updatedAt to float the
+      // row to the top. Mirrors backend ``_maybe_set_title_first_run``.
+      saveLocalConversation(cid, `[task] ${TASK_LABEL[task]}`, task);
       // Don't clear messages — timeline accumulates across runs in the same
       // session. The user clicked "新会话" if they wanted a clean slate.
       setPending(null);
@@ -802,8 +814,12 @@ export default function App() {
       } finally {
         abortControllerRef.current = null;
         setRunning(false);
-        // New conversation entry (or updated metadata) should appear in the
-        // sidebar — bump the refresh key.
+        // The localStorage entry was already upserted at startRun (see
+        // saveLocalConversation call above). Drop the api.ts cache too in
+        // case the user later clicks "从云端恢复" — they should see this
+        // run's data, not a stale snapshot. Bump refreshKey so the
+        // sidebar re-reads localStorage for any concurrent edits.
+        invalidateConversationCache();
         setHistoryRefreshKey((k) => k + 1);
       }
     },
@@ -883,6 +899,7 @@ export default function App() {
       clearDone: true,
       clearClassified: true,
     });
+    invalidateConversationCache();
     setHistoryRefreshKey((k) => k + 1);
     setHistoryOpen(false); // dismiss drawer once user committed to fresh slate
   }, [running]);
@@ -892,13 +909,19 @@ export default function App() {
   const restoreSession = useCallback(
     async (id: string, opts?: { silent?: boolean }) => {
       if (running) return; // never swap mid-run
+      // Race guard: a user-initiated click should NOT overlap with the
+      // mount-time silent restore. ``silent`` callers (only the mount
+      // effect) bypass this so they can always proceed.
+      if (restoring && !opts?.silent) return;
       if (!id) return;
       setRestoring(true);
-      // Immediately clear the old session's visual state so the user doesn't
-      // see stale messages from the previous conversation while the network
-      // request is in flight. Without this, closing the history drawer would
-      // show the OLD session for ~200ms until getConversation resolves.
-      setMessages([]);
+      // Clear ephemeral pieces of the previous session that have no
+      // backing in store: the pending HITL card, live progress chip,
+      // streaming bubble, drawer selection. ``messages`` is intentionally
+      // NOT cleared here — ConversationStream's restoring=true short-
+      // circuit replaces ALL content with the skeleton, and keeping
+      // messages avoids a brief empty-array → repopulate flash if React
+      // batches the next set across the await boundary.
       setPending(null);
       setProgress(null);
       setStreamingText(null);
@@ -908,15 +931,77 @@ export default function App() {
       setHistoryOpen(false);
       try {
         const detail = await getConversation(id);
+
+        // ── Dead-row detection ────────────────────────────────────────
+        // If the platform returns "no messages, no graph state, no next
+        // nodes", AND the user has this id in their localStorage list,
+        // it was deleted from another device (or the platform's storage
+        // dropped it). Auto-clean: remove the local row, surface a brief
+        // notice, and reset to a fresh session so the user isn't stuck
+        // looking at an empty conversation that "shouldn't exist".
+        //
+        // The localStorage-presence guard prevents false positives on
+        // brand-new conversation_ids that simply haven't run yet (those
+        // wouldn't be in the list either way, since saveLocalConversation
+        // only fires in startRun).
+        const isDeadRow =
+          detail.messages.length === 0 &&
+          detail.state === null &&
+          (detail.nextNodes?.length ?? 0) === 0 &&
+          getLocalConversations().some((c) => c.id === id);
+        if (isDeadRow) {
+          removeLocalConversation(id);
+          if (!opts?.silent) {
+            addMessage({
+              kind: 'error',
+              text: '此会话已在其他设备删除',
+            });
+          }
+          // Inline the equivalent of startNewSession (we're already mid-
+          // restoreSession so we can't call it directly without recursion).
+          // If startNewSession grows additional cleanup steps in the future,
+          // they need to be replicated here.
+          const fresh = generateConvId();
+          conversationIdRef.current = fresh;
+          persistSessionId(fresh);
+          setMessages([]);
+          setPending(null);
+          doneEmailIdsRef.current = new Set();
+          setDraftsMap(new Map());
+          dispatchPipeline({
+            type: 'reset',
+            task: 'triage_only',
+            clearDone: true,
+            clearClassified: true,
+          });
+          setHistoryRefreshKey((k) => k + 1);
+          return;  // setRestoring(false) still runs in the finally block
+        }
+
         conversationIdRef.current = id;
         persistSessionId(id);
         const restored = detail.messages.map(storedToStreamMessage);
+
+        // ── URL-shared / new-device session: ensure sidebar entry ───
+        // If this id isn't in the local index AND the conversation has
+        // content, synthesize a localStorage row so the sidebar reflects
+        // what the user is actually looking at. Title comes from the
+        // first user message (mirrors history.py:_derive_title) so it
+        // matches the "[task] xxx" format saveLocalConversation would
+        // have written.
+        if (
+          detail.messages.length > 0 &&
+          !getLocalConversations().some((c) => c.id === id)
+        ) {
+          const title = deriveTitleFromMessages(detail.messages) || '未命名会话';
+          saveLocalConversation(id, title);
+          setHistoryRefreshKey((k) => k + 1);
+        }
+
         setMessages(restored);
         setPending(null);
         setProgress(null);
         setStreamingText(null);
-        setStreamingText(null);
-        setProgress(null);
         if (detail.state) {
           const classified =
             (detail.state.classified as ClassifiedEmail[] | undefined) ?? [];
@@ -1044,11 +1129,21 @@ export default function App() {
             text: `加载会话失败: ${(e as Error).message}`,
           });
         }
+        // Failed restore: clear left column too, otherwise the prior
+        // session's emails would leak through when the skeleton lifts
+        // (restoring=false → EmailInboxTree renders pipeline.classified
+        // which still holds the OLD session). Empty state is honest.
+        doneEmailIdsRef.current = new Set();
+        dispatchPipeline({
+          type: 'restore',
+          classified: [],
+          doneEmailIds: new Set(),
+        });
       } finally {
         setRestoring(false);
       }
     },
-    [running, addMessage],
+    [running, restoring, addMessage],
   );
 
   // Mount: pick / generate the session id, persist to URL + localStorage,
@@ -1266,6 +1361,7 @@ export default function App() {
             onProcessSingle={processSingleEmail}
             onSelectEmail={setSelectedEmailId}
             actionsDisabled={running}
+            restoring={restoring}
           />
           <EmailDetailDrawer
             email={
@@ -1288,6 +1384,7 @@ export default function App() {
             decisionDisabled={running}
             progress={progress}
             streamingText={streamingText}
+            restoring={restoring}
           />
         ) : (
           // Mount-time loading. Without this gate the user briefly sees the
@@ -1377,15 +1474,14 @@ const brandWrap: React.CSSProperties = {
 };
 
 const brandMark: React.CSSProperties = {
-  width: 36,
-  height: 36,
-  borderRadius: tokens.radius.lg,
-  background: tokens.color.gradientBrandStrong,
+  width: 32,
+  height: 32,
+  borderRadius: tokens.radius.md,
+  background: tokens.color.text,
   color: tokens.color.textInverted,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  boxShadow: tokens.shadow.focus,
   flexShrink: 0,
 };
 
@@ -1394,7 +1490,7 @@ const appTitle: React.CSSProperties = {
   fontSize: tokens.fontSize.xl,
   fontWeight: tokens.fontWeight.semibold,
   color: tokens.color.text,
-  letterSpacing: '-0.01em',
+  letterSpacing: '-0.03em',
   lineHeight: 1.2,
 };
 
@@ -1402,7 +1498,7 @@ const appSubtitle: React.CSSProperties = {
   fontSize: tokens.fontSize.xs,
   color: tokens.color.textSubtle,
   fontFamily: tokens.font.mono,
-  letterSpacing: '0.02em',
+  letterSpacing: '0.01em',
 };
 
 const toolbarInner: React.CSSProperties = {
@@ -1430,9 +1526,9 @@ const primaryBtn: React.CSSProperties = {
   alignItems: 'center',
   gap: tokens.space[2],
   background: tokens.color.bg,
-  color: tokens.color.brand,
-  border: `1px solid ${tokens.color.brandBorder}`,
-  padding: `7px ${tokens.space[3]}px`,
+  color: tokens.color.text,
+  border: `1px solid ${tokens.color.border}`,
+  padding: '7px 14px',
   borderRadius: tokens.radius.md,
   fontSize: tokens.fontSize.base,
   fontWeight: tokens.fontWeight.medium,
@@ -1442,29 +1538,24 @@ const primaryBtn: React.CSSProperties = {
 
 const primaryBtnFilled: React.CSSProperties = {
   ...primaryBtn,
-  background: tokens.color.gradientBrandStrong,
+  background: tokens.color.text,
   color: tokens.color.textInverted,
   border: `1px solid transparent`,
-  boxShadow: tokens.shadow.focus,
 };
 
 const ghostBtn: React.CSSProperties = {
   ...primaryBtn,
-  // Subtler than primary — emphasizes this is a secondary "I want to override
-  // the default cache-reuse behavior" action, not a main task launcher.
   background: 'transparent',
   color: tokens.color.textSubtle,
-  border: `1px dashed ${tokens.color.border}`,
+  border: `1px solid ${tokens.color.border}`,
 };
 
-/** "停止" button — danger-toned because it's destructive (kills an in-flight
- * run). Sits inline with the primary actions so it's discoverable: the
- * button people need to find the moment they realize a run is going wrong. */
+/** "停止" button — danger-toned, minimal. */
 const stopBtn: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: tokens.space[2],
-  padding: `7px ${tokens.space[3]}px`,
+  padding: '7px 14px',
   borderRadius: tokens.radius.md,
   fontSize: tokens.fontSize.base,
   fontWeight: tokens.fontWeight.medium,
@@ -1472,42 +1563,39 @@ const stopBtn: React.CSSProperties = {
   cursor: 'pointer',
   color: tokens.color.danger,
   background: tokens.color.dangerSoft,
-  border: `1px solid #fecaca`,
+  border: `1px solid ${tokens.color.border}`,
 };
 
-/** Toolbar's "历史" toggle — opens the slide-out drawer. Subtle styling
- * (ghost variant) so it doesn't compete with the primary task buttons. */
+/** Toolbar's "历史" toggle — ghost. */
 const historyToggleBtn: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 6,
+  gap: 5,
   padding: '7px 12px',
   borderRadius: tokens.radius.md,
   fontSize: tokens.fontSize.sm,
   fontFamily: tokens.font.sans,
   fontWeight: tokens.fontWeight.medium,
-  color: tokens.color.textMuted,
+  color: tokens.color.textSubtle,
   background: 'transparent',
   border: `1px solid ${tokens.color.border}`,
   cursor: 'pointer',
   lineHeight: 1.2,
 };
 
-/** "新会话" — slightly stronger than 历史 (brand-tinted text + dotted brand
- * border) so it reads as a deliberate action, not a meta-navigation toggle.
- * Sits to the LEFT of 历史 so the pair reads "start fresh / look back". */
+/** "新会话" — minimal brand tint. */
 const newSessionBtn: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 6,
+  gap: 5,
   padding: '7px 12px',
   borderRadius: tokens.radius.md,
   fontSize: tokens.fontSize.sm,
   fontFamily: tokens.font.sans,
   fontWeight: tokens.fontWeight.medium,
   color: tokens.color.brand,
-  background: tokens.color.brandSoft,
-  border: `1px solid ${tokens.color.brandBorder}`,
+  background: 'transparent',
+  border: `1px solid ${tokens.color.border}`,
   cursor: 'pointer',
   lineHeight: 1.2,
 };

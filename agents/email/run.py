@@ -75,6 +75,44 @@ def task_label(task: str) -> str:
     return _TASK_LABEL.get(task, task)
 
 
+async def _maybe_set_title_first_run(context, cid: str, title: str) -> None:
+    """Persist a title onto the conversation's ``metadata`` so ``history.py``
+    can render the sidebar list WITHOUT extra ``get_messages`` round-trips.
+
+    Strategy — set title only when the conversation has none yet:
+      - title already exists  → never overwrite (first task wins)
+      - no title (legacy or new) → write through
+
+    Lookup: scan ``list_conversations(limit=20, order="desc")`` for the cid.
+    Called BEFORE the first ``save_message`` of this run, so a recently-used
+    conversation will reliably appear in the top-N. The remaining edge of
+    "conversation_id reused after >24h, falls outside top-20, AND has a
+    title" silently overwriting is documented as accepted for this single-
+    tenant template — when the platform exposes a per-id read API we'll
+    switch to an exact existence check.
+
+    Best-effort: any platform error is swallowed; ``history.py``'s legacy
+    path (derive title from messages) covers any miss.
+    """
+    store = getattr(context, "store", None)
+    if store is None or not hasattr(store, "list_conversations"):
+        return
+    try:
+        result = await store.list_conversations(limit=20, order="desc")
+        for m in getattr(result, "items", []) or []:
+            if m.conversation_id == cid:
+                if (m.metadata or {}).get("title"):
+                    return  # already titled — first task wins
+                break
+        await store.update_conversation(
+            conversation_id=cid,
+            metadata={"title": title},
+        )
+    except Exception:
+        # Title is a UX nicety; never break the run over a metadata write.
+        pass
+
+
 def draft_preview(draft_payload: dict) -> str:
     """Format a HITL draft as a multi-line preview suitable for chat history.
 
@@ -207,11 +245,28 @@ async def handler(context):
         # first user message as the conversation title — these labels become
         # the sidebar entries the user will see ("仅分类邮件" / "处理待回邮件" /
         # "单独处理某封邮件"). Best-effort; any failure is swallowed.
+        #
+        # IMPORTANT — call order matters: ``save_message`` MUST run BEFORE
+        # ``_maybe_set_title_first_run``. The platform's ``append_message``
+        # lazily creates the conversation meta on first write; without it,
+        # ``update_conversation`` (used inside the title helper) raises
+        # ``MemoryNotFoundError`` and the title silently never lands. Get
+        # the meta created first, then patch ``metadata.title`` on top.
         await save_message(
             context,
             role="user",
             content=f"[task] {task_label(task)}",
             metadata={"task": task, "kind": "task_start"},
+        )
+        # Title shortcut: write to ``metadata.title`` so the cross-device
+        # restore path (frontend "从云端恢复" button) sees the proper label
+        # without scanning messages. ``_maybe_set_title_first_run`` only
+        # writes when title is absent — first task wins on a multi-task
+        # session sharing the same conversation_id.
+        await _maybe_set_title_first_run(
+            context,
+            conversation_id,
+            f"[task] {task_label(task)}",
         )
 
         # First frame: session id, used by the client to later POST /email/stop

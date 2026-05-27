@@ -1,66 +1,67 @@
 /**
- * Linear-style design tokens — aligned with the sibling
- * marketing-campaign-planner-crewai template so the whole Pages Agents
- * template family feels like one product (white surface, neutral grays,
- * single brand purple, 4/8 spacing scale, subtle borders).
+ * Design tokens — Minimal premium style.
+ *
+ * Inspired by Linear / Vercel / Raycast: neutral surfaces, disciplined
+ * spacing, near-zero decoration, and a single muted teal accent that
+ * surfaces only where it earns attention. No gradients on surfaces,
+ * no heavy shadows; hierarchy comes from typography weight + spacing,
+ * not from color volume.
  */
 
 export const tokens = {
   color: {
-    // Surfaces — layered: bg (canvas) → surface (panel) → surfaceElevated (card)
+    // Surfaces — layered neutral grays (zero hue tint)
     bg: '#ffffff',
     surface: '#fafafa',
-    surfaceHover: '#f4f4f5',
-    surfaceMuted: '#f8fafc',
+    surfaceHover: '#f5f5f5',
+    surfaceMuted: '#f0f0f0',
     surfaceElevated: '#ffffff',
-    // Subtle gradient used for hero / brand surfaces (ConversationStream
-    // onboarding, header accent line)
-    gradientBrand: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)',
-    gradientBrandStrong: 'linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)',
+    gradientBrand: 'linear-gradient(135deg, #f5f5f5 0%, #fafafa 100%)',
+    gradientBrandStrong: 'linear-gradient(135deg, #115e59 0%, #0d9488 100%)',
 
-    // Borders — borderSubtle for ultra-quiet dividers (inside cards)
-    border: '#e5e7eb',
-    borderStrong: '#d4d4d8',
-    borderSubtle: '#f1f1f3',
+    // Borders — barely there
+    border: '#e8e8e8',
+    borderStrong: '#d4d4d4',
+    borderSubtle: '#f0f0f0',
 
-    // Text
+    // Text — high contrast hierarchy (no mid-tone confusion)
     text: '#0a0a0a',
-    textMuted: '#52525b',
-    textSubtle: '#71717a',
-    textDisabled: '#a1a1aa',
+    textMuted: '#525252',
+    textSubtle: '#737373',
+    textDisabled: '#a3a3a3',
     textInverted: '#ffffff',
 
-    // Brand
-    brand: '#7c3aed',
-    brandHover: '#6d28d9',
-    brandSoft: '#f5f3ff',
-    brandSofter: '#faf8ff',
-    brandBorder: '#ddd6fe',
+    // Brand — muted teal (used sparingly: active states, primary CTA, links)
+    brand: '#0d9488',
+    brandHover: '#0f766e',
+    brandSoft: '#f0fdfa',
+    brandSofter: '#f7fffe',
+    brandBorder: '#5eead4',
 
-    // Status
-    success: '#16a34a',
+    // Status — desaturated, understated
+    success: '#15803d',
     successSoft: '#f0fdf4',
-    warning: '#ca8a04',
+    warning: '#a16207',
     warningSoft: '#fefce8',
-    danger: '#dc2626',
+    danger: '#b91c1c',
     dangerSoft: '#fef2f2',
-    info: '#0ea5e9',
+    info: '#0284c7',
     infoSoft: '#f0f9ff',
 
-    // Email category palette (semantic mapping for the inbox tree)
-    categoryUrgent: '#dc2626',
-    categoryMeeting: '#0ea5e9',
-    categoryInternal: '#7c3aed',
-    categoryMarketing: '#ca8a04',
-    categoryNotification: '#52525b',
-    categoryFollowup: '#16a34a',
-    categorySpam: '#a1a1aa',
+    // Email category palette — more muted / fewer bright primaries
+    categoryUrgent: '#b91c1c',
+    categoryMeeting: '#0284c7',
+    categoryInternal: '#0d9488',
+    categoryMarketing: '#a16207',
+    categoryNotification: '#6b7280',
+    categoryFollowup: '#15803d',
+    categorySpam: '#9ca3af',
     categoryBilling: '#7c3aed',
-    categoryOther: '#71717a',
+    categoryOther: '#6b7280',
   },
 
   font: {
-    sans: "'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    sans: "'Inter', 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     mono: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace",
   },
 
@@ -71,8 +72,8 @@ export const tokens = {
     md: 14,
     lg: 15,
     xl: 18,
-    '2xl': 22,
-    '3xl': 28,
+    '2xl': 20,
+    '3xl': 26,
   },
 
   fontWeight: {
@@ -84,8 +85,9 @@ export const tokens = {
 
   lineHeight: {
     tight: 1.3,
-    snug: 1.45,
+    snug: 1.5,
     normal: 1.6,
+    relaxed: 1.75,
   },
 
   space: {
@@ -94,11 +96,10 @@ export const tokens = {
     3: 12,
     4: 16,
     5: 20,
-    6: 24,
-    8: 32,
-    10: 40,
-    12: 48,
-  },
+    6: 28,
+    7: 36,
+    8: 48,
+  } as Record<number, number>,
 
   radius: {
     sm: 4,
@@ -110,19 +111,17 @@ export const tokens = {
   },
 
   shadow: {
-    sm: '0 1px 2px rgba(15, 23, 42, 0.04)',
-    md: '0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04)',
-    pop: '0 8px 24px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04)',
-    // Used on the active "in flight" node + DraftReviewCard for that
-    // "this is the focal point of the screen" feeling.
-    focus: '0 4px 16px rgba(124, 58, 237, 0.12), 0 1px 3px rgba(124, 58, 237, 0.08)',
-    inset: 'inset 0 0 0 1px rgba(15, 23, 42, 0.04)',
+    sm: '0 1px 2px rgba(0, 0, 0, 0.03)',
+    md: '0 2px 6px rgba(0, 0, 0, 0.04)',
+    pop: '0 8px 24px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.02)',
+    focus: '0 0 0 2px rgba(13, 148, 136, 0.12)',
+    inset: 'inset 0 0 0 1px rgba(0, 0, 0, 0.04)',
   },
 
   motion: {
-    fast: '120ms ease',
-    base: '180ms ease',
-    slow: '240ms cubic-bezier(0.2, 0, 0, 1)',
-    spring: '320ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+    fast: '100ms ease',
+    base: '150ms ease',
+    slow: '220ms cubic-bezier(0.2, 0, 0, 1)',
+    spring: '280ms cubic-bezier(0.34, 1.56, 0.64, 1)',
   },
 } as const;

@@ -24,6 +24,7 @@ a large conversation isn't slow.
 """
 from __future__ import annotations
 
+import asyncio
 import sys
 import traceback
 from pathlib import Path
@@ -94,7 +95,6 @@ async def _handle_list(context):
 
     result = await store.list_conversations(limit=_LIST_LIMIT, order="desc")
 
-    items = []
     # Dedupe by conversation_id. The platform's index keys include the
     # ``last_message_at`` timestamp; appending a message writes a new index
     # key and tries to delete the old. In dev mode (local blob store) the
@@ -102,13 +102,42 @@ async def _handle_list(context):
     # all resolve to the SAME conversation_id → list_conversations returns
     # the meta multiple times. We surface the most recent one only.
     seen_ids: set[str] = set()
-    # ``ListConversationsResult.items`` is a list of ConversationMeta dataclasses.
+    unique_metas = []
     for meta in getattr(result, "items", []):
         if meta.conversation_id in seen_ids:
             continue
         seen_ids.add(meta.conversation_id)
-        # Pull the first few messages to derive a title. Sidebar only renders
-        # short labels; reading 5 messages per conv keeps this lightweight.
+        unique_metas.append(meta)
+
+    # Fast path vs slow path.
+    #
+    # Fast path: ``run.py`` writes ``metadata.title`` on the conversation's
+    # first message. We can assemble the row entirely from the meta — no
+    # extra store I/O. This applies to every conversation created after
+    # the metadata-title rollout, which is essentially all of them after
+    # the first run of each session.
+    #
+    # Slow path (legacy): older conversations created before the title
+    # was persisted to metadata. We fall back to the original logic of
+    # fetching the first few messages and deriving a title from the
+    # first user message. Done in parallel via asyncio.gather so a list
+    # with many legacy items still loads quickly.
+    fast_items: list[dict] = []
+    needs_fallback = []
+    for meta in unique_metas:
+        title = (meta.metadata or {}).get("title")
+        if title:
+            fast_items.append({
+                "id": meta.conversation_id,
+                "title": title,
+                "createdAt": meta.created_at,
+                "lastMessageAt": meta.last_message_at,
+                "messageCount": meta.message_count,
+            })
+        else:
+            needs_fallback.append(meta)
+
+    async def _fetch_title(meta) -> dict:
         msg_dicts = []
         try:
             msgs = await store.get_messages(
@@ -118,16 +147,26 @@ async def _handle_list(context):
             )
             msg_dicts = [_msg_to_dict(m) for m in msgs]
         except Exception:
-            # Conversation may have meta but no messages yet (race condition
-            # right after append_message). Title falls back to id.
             pass
-        items.append({
+        return {
             "id": meta.conversation_id,
             "title": _derive_title(msg_dicts) or meta.conversation_id,
             "createdAt": meta.created_at,
             "lastMessageAt": meta.last_message_at,
             "messageCount": meta.message_count,
-        })
+        }
+
+    fallback_items: list[dict] = []
+    if needs_fallback:
+        fallback_items = list(
+            await asyncio.gather(*[_fetch_title(m) for m in needs_fallback])
+        )
+
+    items = fast_items + fallback_items
+    # Re-sort: fast and slow paths are merged out of order — keep the
+    # frontend's expected "newest first" by lastMessageAt.
+    items.sort(key=lambda x: x.get("lastMessageAt") or 0, reverse=True)
+
     return {
         "conversations": items,
         "nextCursor": getattr(result, "next_cursor", None),

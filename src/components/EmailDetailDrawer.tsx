@@ -37,22 +37,6 @@ const CATEGORY_LABEL: Record<EmailCategory, string> = {
 };
 
 export default function EmailDetailDrawer({ email, draft, isOpen, onClose }: Props) {
-  // Manage the open/close animation state
-  const [visible, setVisible] = useState(false);
-  const [animating, setAnimating] = useState(false);
-
-  useEffect(() => {
-    if (isOpen) {
-      setVisible(true);
-      // Trigger animation on next frame
-      requestAnimationFrame(() => setAnimating(true));
-    } else {
-      setAnimating(false);
-      const timer = setTimeout(() => setVisible(false), 180);
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen]);
-
   // Escape key to close
   useEffect(() => {
     if (!isOpen) return;
@@ -63,16 +47,16 @@ export default function EmailDetailDrawer({ email, draft, isOpen, onClose }: Pro
     return () => window.removeEventListener('keydown', handleKey);
   }, [isOpen, onClose]);
 
-  if (!visible || !email) return null;
+  if (!isOpen || !email) return null;
 
   return (
-    <div style={overlay} onClick={onClose} aria-hidden={!isOpen}>
+    <div
+      style={overlay}
+      onClick={onClose}
+      aria-hidden={!isOpen}
+    >
       <aside
-        style={{
-          ...drawer,
-          transform: animating ? 'translateX(0)' : 'translateX(-100%)',
-          opacity: animating ? 1 : 0,
-        }}
+        style={drawer}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="邮件详情"
@@ -105,9 +89,14 @@ function DrawerHeader({
       <button onClick={onClose} style={closeBtn} title="关闭 (Esc)">
         <Icon name="x" size={16} strokeWidth={2} />
       </button>
-      <span style={headerTitle}>
-        {(email.email.subject || '(无主题)').slice(0, 50)}
-      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={headerTitle}>
+          {(email.email.subject || '(无主题)').slice(0, 60)}
+        </div>
+        <div style={headerSender}>
+          {email.email.sender || email.email.from_ || (email.email as { from?: string }).from || ''}
+        </div>
+      </div>
       {draft && <CopyButton text={draft.body} label="复制草稿" />}
     </header>
   );
@@ -115,7 +104,7 @@ function DrawerHeader({
 
 function MetaSection({ email }: { email: ClassifiedEmail }) {
   const e = email.email;
-  const sender = (e as { from_?: string; from?: string }).from_ || (e as { from?: string }).from || '';
+  const sender = e.sender || e.from_ || (e as { from?: string }).from || '(未知发件人)';
   const received = e.received_at
     ? new Date(e.received_at).toLocaleString('zh-CN', {
         month: 'short',
@@ -220,7 +209,7 @@ function OriginalBodySection({ email }: { email: ClassifiedEmail }) {
       {viewMode === 'html' && hasHtml ? (
         <iframe
           sandbox="allow-popups allow-popups-to-escape-sandbox"
-          srcDoc={email.email.body_html!}
+          srcDoc={`<style>body{margin:8px;overflow-x:auto;word-break:break-word;overflow-wrap:break-word;font-family:system-ui,sans-serif;font-size:14px;line-height:1.6}img{max-width:100%;height:auto}table{max-width:100%;border-collapse:collapse;overflow-wrap:break-word}td,th{word-break:break-word;overflow-wrap:break-word}pre,code{white-space:pre-wrap;max-width:100%}blockquote{margin-left:8px;padding-left:8px;border-left:3px solid #e5e7eb}</style>${email.email.body_html!}`}
           style={htmlIframe}
           title="邮件原文"
         />
@@ -311,17 +300,18 @@ const overlay: React.CSSProperties = {
   background: 'rgba(0, 0, 0, 0.25)',
   display: 'flex',
   alignItems: 'stretch',
+  animation: 'drawerBackdropIn 200ms ease-out',
 };
 
 const drawer: React.CSSProperties = {
-  width: 'min(420px, 90vw)',
+  width: 'min(560px, 90vw)',
   height: '100%',
   background: tokens.color.bg,
   boxShadow: `${tokens.shadow.pop}, 12px 0 40px rgba(0,0,0,0.12)`,
   display: 'flex',
   flexDirection: 'column',
-  transition: 'transform 200ms ease-out, opacity 180ms ease-out',
   overflow: 'hidden',
+  animation: 'drawerSlideIn 280ms cubic-bezier(0.32, 0.72, 0, 1)',
 };
 
 const header: React.CSSProperties = {
@@ -348,14 +338,21 @@ const closeBtn: React.CSSProperties = {
 };
 
 const headerTitle: React.CSSProperties = {
-  flex: 1,
-  minWidth: 0,
-  fontSize: tokens.fontSize.sm,
+  fontSize: tokens.fontSize.md,
   fontWeight: tokens.fontWeight.semibold,
   color: tokens.color.text,
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
+};
+
+const headerSender: React.CSSProperties = {
+  fontSize: tokens.fontSize.xs,
+  color: tokens.color.textSubtle,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  marginTop: 2,
 };
 
 const body: React.CSSProperties = {
@@ -462,8 +459,10 @@ const emailBody: React.CSSProperties = {
   lineHeight: 1.7,
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
-  maxHeight: 280,
+  overflowWrap: 'break-word',
+  maxHeight: 480,
   overflowY: 'auto',
+  overflowX: 'hidden',
 };
 
 const emptyDraft: React.CSSProperties = {
@@ -540,8 +539,8 @@ const viewToggleBtnActive: React.CSSProperties = {
 
 const htmlIframe: React.CSSProperties = {
   width: '100%',
-  minHeight: 300,
-  maxHeight: 500,
+  minHeight: 360,
+  maxHeight: 600,
   border: `1px solid ${tokens.color.border}`,
   borderRadius: tokens.radius.md,
   background: '#fff',

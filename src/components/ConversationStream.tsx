@@ -55,6 +55,13 @@ interface Props {
    * replaced by a real timeline message once the phase completes (done
    * event for summary; human_review_required for draft). */
   streamingText?: { phase: 'summarize' | 'draft'; text: string } | null;
+  /** True while App.tsx is hydrating a previously-stored conversation
+   * (user clicked a row in the history sidebar). Renders a skeleton
+   * placeholder INSTEAD of all other content (messages, OnboardingPanel,
+   * pendingDraft, streamingText, progress pill) so the user never sees
+   * stale content from the previous session OR the empty OnboardingPanel
+   * during the ~200-500ms /email/history fetch. */
+  restoring?: boolean;
 }
 
 export default function ConversationStream({
@@ -64,6 +71,7 @@ export default function ConversationStream({
   decisionDisabled,
   progress,
   streamingText,
+  restoring,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -120,6 +128,22 @@ export default function ConversationStream({
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
     setPinnedToBottom(atBottom);
+  }
+
+  // Restoring takeover: when the parent is hydrating a previously stored
+  // conversation, render the skeleton INSTEAD of any other content
+  // (messages, OnboardingPanel, pendingDraft, streamingText, progress
+  // pill). This is the visual gate that fixes "click a history row →
+  // OnboardingPanel flashes for 200ms before content fills in" — the
+  // skeleton is shown the whole way through, then atomically replaced
+  // by the real timeline once the fetch resolves and ``restoring`` flips
+  // back to false.
+  if (restoring) {
+    return (
+      <main style={shell}>
+        <RestoringSkeleton />
+      </main>
+    );
   }
 
   if (messages.length === 0 && !pendingDraft && !streamingText) {
@@ -245,11 +269,40 @@ function LiveProgressPill({ progress }: { progress: ProgressPayload }) {
   );
 }
 
+/**
+ * RestoringSkeleton — placeholder shown while App.tsx hydrates a previously-
+ * stored conversation from /email/history. Replaces ALL content (messages,
+ * pendingDraft, streamingText, progress pill) for the ~200-500ms fetch
+ * window so the user sees a smooth "loading" state instead of either:
+ *   (a) the OnboardingPanel briefly appearing and then swapping in the
+ *       restored timeline (the bug we're fixing), or
+ *   (b) stale messages from the previous session lingering visually.
+ *
+ * The skeleton mimics the rough shape of MessageRow bubbles (avatar dot +
+ * 2-line content block) at varying widths so the eye reads it as "real
+ * content arriving" rather than a generic spinner. Uses the global
+ * ``shimmer`` keyframe defined in index.css.
+ */
+function RestoringSkeleton() {
+  return (
+    <div style={skeletonShell}>
+      {[0.85, 0.6, 0.92, 0.55, 0.78].map((widthFrac, i) => (
+        <div key={i} style={skeletonRow}>
+          <div style={skeletonAvatar} />
+          <div style={skeletonBody}>
+            <div style={{ ...skeletonBar, width: `${Math.round(widthFrac * 100)}%` }} />
+            <div style={{ ...skeletonBar, width: `${Math.round(widthFrac * 70)}%`, opacity: 0.7 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function OnboardingPanel() {
   return (
     <div style={onboardingShell}>
-      <div style={onboardingInner}>
-        <div style={heroPanel}>
+      <div style={onboardingInner}>        <div style={heroPanel}>
           <div style={heroBadge}>
             <Icon name="sparkles" size={12} />
             <span>EdgeOne Pages Agent · 邮件模板</span>
@@ -589,13 +642,12 @@ const stream: React.CSSProperties = {
   flex: 1,
   minHeight: 0,
   overflowY: 'auto',
-  padding: tokens.space[4],
+  padding: tokens.space[5],
   // Reserve room at the bottom so the pill never covers the last message.
-  // 56px = pill height (~32) + 16 padding + a little breathing room.
-  paddingBottom: 56,
+  paddingBottom: 64,
   display: 'flex',
   flexDirection: 'column',
-  gap: tokens.space[2],
+  gap: tokens.space[3],
 };
 
 // ─── Live progress pill (rendered by LiveProgressPill) ─────────────────────
@@ -698,9 +750,9 @@ const row: React.CSSProperties = {
 const bubble: React.CSSProperties = {
   border: '1px solid',
   borderRadius: tokens.radius.lg,
-  padding: `${tokens.space[2]}px ${tokens.space[3]}px`,
+  padding: `${tokens.space[3]}px ${tokens.space[4]}px`,
   fontSize: tokens.fontSize.base,
-  lineHeight: tokens.lineHeight.snug,
+  lineHeight: tokens.lineHeight.normal,
   boxShadow: tokens.shadow.sm,
   minWidth: 0,
 };
@@ -1047,4 +1099,48 @@ const whoLabel: React.CSSProperties = {
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
   paddingLeft: tokens.space[1],
+};
+
+// ─── Restoring skeleton (history-row click → session hydration) ────────────
+
+const skeletonShell: React.CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: tokens.space[3],
+  padding: `${tokens.space[5]}px ${tokens.space[5]}px`,
+  overflow: 'hidden',
+};
+
+const skeletonRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: tokens.space[3],
+};
+
+const skeletonAvatar: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  borderRadius: '50%',
+  flexShrink: 0,
+  background: `linear-gradient(90deg, ${tokens.color.surface} 25%, ${tokens.color.surfaceHover} 50%, ${tokens.color.surface} 75%)`,
+  backgroundSize: '200px 100%',
+  animation: 'shimmer 1.5s ease-in-out infinite',
+};
+
+const skeletonBody: React.CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  paddingTop: 4,
+  minWidth: 0,
+};
+
+const skeletonBar: React.CSSProperties = {
+  height: 12,
+  borderRadius: tokens.radius.sm,
+  background: `linear-gradient(90deg, ${tokens.color.surface} 25%, ${tokens.color.surfaceHover} 50%, ${tokens.color.surface} 75%)`,
+  backgroundSize: '200px 100%',
+  animation: 'shimmer 1.5s ease-in-out infinite',
 };

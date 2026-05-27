@@ -25,7 +25,7 @@
  * transition so it animates out, then unmount. ``useDrawerTransition``
  * encodes that lifecycle. Honors ``prefers-reduced-motion``.
  */
-import { ReactNode, useEffect, useRef, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { tokens } from '../design-tokens';
 
 interface Props {
@@ -66,6 +66,31 @@ export default function ChatLayout({
 }: Props) {
   const compact = useCompactLayout();
   const drawer = useDrawerTransition(!!historyOpen);
+  const [leftWidth, setLeftWidth] = useState(280);
+  const draggingRef = useRef(false);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    const startX = e.clientX;
+    const startW = leftWidth;
+    const onMove = (ev: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const delta = ev.clientX - startX;
+      setLeftWidth(Math.max(180, Math.min(450, startW + delta)));
+    };
+    const onUp = () => {
+      draggingRef.current = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [leftWidth]);
 
   // Close on Escape — universal "drawer dismiss" affordance. Only attaches
   // the listener when the drawer is open so we don't pay the cost otherwise.
@@ -85,10 +110,17 @@ export default function ChatLayout({
       <div
         style={{
           ...body,
-          gridTemplateColumns: compact ? '1fr' : '260px 1fr 280px',
+          gridTemplateColumns: compact ? '1fr' : `${leftWidth}px 4px 1fr 280px`,
         }}
       >
         <div style={{ ...col, order: compact ? 1 : 0, minHeight: compact ? 200 : 0 }}>{left}</div>
+        {!compact && (
+          <div
+            style={resizeHandle}
+            onMouseDown={onMouseDown}
+            title="拖拽调整宽度"
+          />
+        )}
         <div style={{ ...col, order: compact ? 0 : 0 }}>{center}</div>
         <div style={{ ...col, order: compact ? 2 : 0, minHeight: compact ? 200 : 0 }}>{right}</div>
       </div>
@@ -219,10 +251,6 @@ const headerStyle: React.CSSProperties = {
   padding: `${tokens.space[3]}px ${tokens.space[5]}px`,
   borderBottom: `1px solid ${tokens.color.border}`,
   background: tokens.color.bg,
-  // Subtle brand wash makes the header feel like a real product chrome,
-  // not a generic gray bar. Very low opacity so it doesn't compete with content.
-  backgroundImage:
-    'linear-gradient(180deg, rgba(124,58,237,0.04) 0%, rgba(124,58,237,0) 100%)',
 };
 
 const toolbarStyle: React.CSSProperties = {
@@ -241,6 +269,16 @@ const col: React.CSSProperties = {
   flexDirection: 'column',
   minHeight: 0,
   overflow: 'hidden',
+};
+
+const resizeHandle: React.CSSProperties = {
+  width: 4,
+  cursor: 'col-resize',
+  background: 'transparent',
+  position: 'relative',
+  zIndex: 2,
+  transition: 'background 150ms ease',
+  // Expand hit area beyond visual width for easier grabbing
 };
 
 const overlayBackdrop: React.CSSProperties = {

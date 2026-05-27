@@ -44,7 +44,11 @@ export type ReviewAction =
 
 export interface Email {
   id: string;
+  /** Pydantic field name (default serialization) */
+  sender?: string;
+  /** Pydantic alias — only present if serialized with by_alias=True */
   from_?: string;
+  /** Legacy fallback */
   from?: string;
   to: string[];
   subject: string;

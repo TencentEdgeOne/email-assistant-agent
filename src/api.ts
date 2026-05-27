@@ -134,6 +134,28 @@ export interface ConversationListItem {
   messageCount: number;
 }
 
+// ─── Conversation list cache (in-memory, single tab) ────────────────────────
+//
+// The /email/history list call is mostly idempotent on a quiet UI — the same
+// conversations come back unchanged for tens of seconds. Caching with a 30s
+// TTL turns "open history drawer" from a 200-800ms wait (10+ items, even after
+// the backend's parallel title fetch) into an instant render on the second
+// open. Invalidate explicitly after run finishes / new session / delete.
+//
+// In-flight dedupe: HistorySidebar can mount/re-mount in quick succession
+// (drawer animation, refreshKey changes). _inflight ensures only one network
+// request runs at a time.
+//
+// Epoch trick: invalidate bumps _epoch. A fetch that started before invalidate
+// will check _epoch on resolve — if it doesn't match, it skips the cache write
+// (its result is stale relative to whatever event triggered the invalidate).
+// This avoids "stale snapshot persisted for 30s after a delete/run" without
+// the complexity of AbortController plumbing.
+let _cache: { items: ConversationListItem[]; ts: number } | null = null;
+let _inflight: Promise<ConversationListItem[]> | null = null;
+let _epoch = 0;
+const CACHE_TTL_MS = 30_000;
+
 export interface StoredMessage {
   /** Message-id assigned by the platform (msg_xxx). */
   message_id?: string;
@@ -175,9 +197,50 @@ async function postHistory(body: Record<string, unknown>, conversationId?: strin
   return jsonOrThrow(res, '/email/history');
 }
 
-export async function listConversations(): Promise<ConversationListItem[]> {
-  const data = (await postHistory({ action: 'list' })) as { conversations?: ConversationListItem[] };
-  return data.conversations ?? [];
+export async function listConversations(opts?: { force?: boolean }): Promise<ConversationListItem[]> {
+  if (!opts?.force && _cache && Date.now() - _cache.ts < CACHE_TTL_MS) {
+    return _cache.items;
+  }
+  // Dedupe concurrent fetches: if a request is already in flight, return its
+  // promise instead of starting a parallel one. The HistorySidebar can mount
+  // and re-mount quickly (drawer toggle) — without this, each mount fires its
+  // own request.
+  if (_inflight) return _inflight;
+  const startEpoch = _epoch;
+  _inflight = (async () => {
+    try {
+      const data = (await postHistory({ action: 'list' })) as { conversations?: ConversationListItem[] };
+      const items = data.conversations ?? [];
+      // Only write to cache if no invalidate happened mid-flight. Otherwise
+      // we'd persist a stale snapshot for up to CACHE_TTL_MS. The current
+      // caller still receives ``items`` (it was committed to this fetch);
+      // the next caller sees ``_cache=null`` and triggers a fresh fetch.
+      if (_epoch === startEpoch) {
+        _cache = { items, ts: Date.now() };
+      }
+      return items;
+    } finally {
+      _inflight = null;
+    }
+  })();
+  return _inflight;
+}
+
+/** Synchronously read the cached conversation list, or null if cold/stale.
+ * Used by HistorySidebar on mount to render instantly when a recent fetch
+ * is still warm — avoiding the loading-skeleton flash on every drawer open. */
+export function getCachedConversations(): ConversationListItem[] | null {
+  if (!_cache) return null;
+  if (Date.now() - _cache.ts > CACHE_TTL_MS) return null;
+  return _cache.items;
+}
+
+/** Drop the cache and bump the in-flight epoch so any pending fetch's
+ * write-back is discarded. Call this after any mutation that invalidates
+ * the list: run finishes, new session created, conversation deleted. */
+export function invalidateConversationCache(): void {
+  _cache = null;
+  _epoch++;
 }
 
 export async function getConversation(id: string): Promise<ConversationDetail> {

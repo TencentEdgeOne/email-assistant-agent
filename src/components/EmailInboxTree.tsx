@@ -42,6 +42,13 @@ interface Props {
   onSelectEmail?: (emailId: string) => void;
   /** Disables the per-row action button (e.g. while a run is in flight). */
   actionsDisabled?: boolean;
+  /** True while App.tsx is hydrating a previously-stored conversation
+   * (user clicked a row in the history sidebar). Renders a skeleton
+   * placeholder INSTEAD of all other content (search input, category
+   * tree, empty state) for the duration of the /email/history fetch.
+   * Mirrors the same pattern as ConversationStream.tsx — keeps the
+   * left and center columns visually in sync during the transition. */
+  restoring?: boolean;
 }
 
 const CATEGORY_LABEL: Record<EmailCategory, string> = {
@@ -102,7 +109,24 @@ export default function EmailInboxTree({
   onProcessSingle,
   onSelectEmail,
   actionsDisabled,
+  restoring,
 }: Props) {
+  // Restoring takeover: when App.tsx is hydrating a past conversation,
+  // render skeleton INSTEAD of any other state (empty / loading / list).
+  // Same pattern as ConversationStream.tsx — keeps left and center
+  // columns visually consistent during the ~200-500ms fetch window so
+  // the user doesn't see the previous session's emails leaking through.
+  if (restoring) {
+    return (
+      <aside style={shell}>
+        <h2 style={heading}>
+          <Icon name="inbox" size={13} />
+          <span>邮件分类</span>
+        </h2>
+        <InboxSkeleton />
+      </aside>
+    );
+  }
   if (emails.length === 0) {
     // Three states for the empty list, in priority order:
     //   1. classifying: we already have raw fetched count, just waiting on the
@@ -149,7 +173,7 @@ export default function EmailInboxTree({
       list = list.filter(
         (c) =>
           (c.email.subject || '').toLowerCase().includes(q) ||
-          (c.email.from_ || c.email.from || '').toLowerCase().includes(q),
+          (c.email.sender || c.email.from_ || c.email.from || '').toLowerCase().includes(q),
       );
     }
     if (categoryFilter) {
@@ -318,7 +342,7 @@ function EmailRow({
   onSelect?: (emailId: string) => void;
   actionsDisabled?: boolean;
 }) {
-  const senderRaw = classified.email.from || classified.email.from_ || '';
+  const senderRaw = classified.email.sender || classified.email.from_ || classified.email.from || '';
   const sender = friendlyName(senderRaw);
   // Inline action: show on every classified row so the user can force a
   // single-reply pipeline on ANY email. We deliberately don't gate on
@@ -330,6 +354,7 @@ function EmailRow({
   const showAction = !!onProcess && !isDone && !isActive;
   return (
     <li
+      data-email-row=""
       title={classified.reason || classified.email.subject}
       onClick={() => onSelect?.(classified.email.id)}
       style={{
@@ -363,6 +388,7 @@ function EmailRow({
         {isActive && <span style={activeTag}>审批中</span>}
         {showAction && (
           <button
+            data-process-btn=""
             type="button"
             onClick={(e) => {
               e.stopPropagation();
@@ -371,7 +397,6 @@ function EmailRow({
             disabled={actionsDisabled}
             style={{
               ...processBtn,
-              opacity: actionsDisabled ? 0.4 : 1,
               cursor: actionsDisabled ? 'not-allowed' : 'pointer',
             }}
             title="单独处理这一封邮件(跳过其它)"
@@ -448,7 +473,7 @@ const shell: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: tokens.space[3],
-  padding: tokens.space[3],
+  padding: tokens.space[4],
   background: tokens.color.surface,
   borderRight: `1px solid ${tokens.color.border}`,
   overflowY: 'auto',
@@ -547,7 +572,7 @@ const treeWrap: React.CSSProperties = {
 const catShell: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: tokens.space[1],
+  gap: tokens.space[2],
 };
 
 const catHeader: React.CSSProperties = {
@@ -576,13 +601,13 @@ const list: React.CSSProperties = {
   padding: 0,
   display: 'flex',
   flexDirection: 'column',
-  gap: 2,
+  gap: 4,
 };
 
 const row: React.CSSProperties = {
-  padding: `${tokens.space[2]}px ${tokens.space[2]}px`,
+  padding: `${tokens.space[2]}px ${tokens.space[3]}px`,
   borderRadius: tokens.radius.md,
-  cursor: 'default',
+  cursor: 'pointer',
   transition: tokens.motion.fast,
   border: '1px solid transparent',
 };
@@ -752,4 +777,86 @@ const filterResult: React.CSSProperties = {
   fontFamily: tokens.font.mono,
   color: tokens.color.textSubtle,
   textAlign: 'center',
+};
+
+// ─── Restoring skeleton (used when App.tsx is hydrating a past session) ────
+
+/**
+ * InboxSkeleton — shimmer placeholders mimicking the rough shape of the
+ * inbox tree (search bar + 3 category sections × 2-3 rows). Shown for the
+ * brief window between user clicking a history row and getConversation
+ * returning. Replaces ALL content (search input, filters, tree, empty
+ * state) so the user doesn't see stale emails leak through.
+ */
+function InboxSkeleton() {
+  return (
+    <div style={skeletonShell}>
+      <div style={{ ...skeletonBar, height: 32, borderRadius: tokens.radius.md }} />
+      {[
+        { title: 80, rows: 3 },
+        { title: 60, rows: 2 },
+        { title: 70, rows: 2 },
+      ].map((section, i) => (
+        <div key={i} style={skeletonSection}>
+          <div style={{ ...skeletonBar, width: section.title, height: 10 }} />
+          {Array.from({ length: section.rows }).map((_, j) => (
+            <div key={j} style={skeletonRow}>
+              <div style={skeletonDot} />
+              <div style={skeletonRowBody}>
+                <div style={{ ...skeletonBar, width: `${75 + j * 5}%` }} />
+                <div style={{ ...skeletonBar, width: `${50 + j * 8}%`, height: 9, opacity: 0.7 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const skeletonShell: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: tokens.space[4],
+  padding: `${tokens.space[2]}px ${tokens.space[1]}px`,
+};
+
+const skeletonSection: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: tokens.space[2],
+};
+
+const skeletonRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: tokens.space[2],
+  padding: `${tokens.space[2]}px ${tokens.space[1]}px`,
+};
+
+const skeletonDot: React.CSSProperties = {
+  width: 8,
+  height: 8,
+  borderRadius: '50%',
+  marginTop: 4,
+  flexShrink: 0,
+  background: `linear-gradient(90deg, ${tokens.color.surface} 25%, ${tokens.color.surfaceHover} 50%, ${tokens.color.surface} 75%)`,
+  backgroundSize: '200px 100%',
+  animation: 'shimmer 1.5s ease-in-out infinite',
+};
+
+const skeletonRowBody: React.CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  minWidth: 0,
+};
+
+const skeletonBar: React.CSSProperties = {
+  height: 12,
+  borderRadius: tokens.radius.sm,
+  background: `linear-gradient(90deg, ${tokens.color.surface} 25%, ${tokens.color.surfaceHover} 50%, ${tokens.color.surface} 75%)`,
+  backgroundSize: '200px 100%',
+  animation: 'shimmer 1.5s ease-in-out infinite',
 };

@@ -5,11 +5,16 @@
  * conversation; the active one is highlighted; "新会话" up top kicks off a
  * fresh ``conversation_id``.
  *
- * Data:
- *   - feeds from ``/email/history`` action="list" (see ``../api.ts``).
- *   - title is derived backend-side from the first user message ("[task]
- *     仅分类邮件" / "处理待回邮件" / etc.) so this component doesn't need
- *     to inspect message contents.
+ * Data source: localStorage via ``../historyStorage``. The platform's
+ * ``/email/history`` is NOT called on mount — we want instant first-paint
+ * (0ms, no spinner) at the cost of cross-device sync. When localStorage is
+ * empty (new device or cleared cache) we surface a "从云端恢复" button that
+ * pulls the platform's authoritative list and merges it in.
+ *
+ * Title derivation: written by ``startRun`` in ``../App.tsx`` via
+ * ``saveLocalConversation`` using the same "[task] xxx" label the backend
+ * persists to ``metadata.title``. Both sides use first-write-wins so titles
+ * are stable across re-runs of the same conversation_id.
  *
  * UX choices:
  *   - delete shows on row hover, never as a fixed icon — keeps the idle
@@ -22,18 +27,24 @@ import { useEffect, useState } from 'react';
 import { tokens } from '../design-tokens';
 import { Icon, IconSpinner } from '../icons';
 import {
-  ConversationListItem,
   deleteConversation,
+  invalidateConversationCache,
   listConversations,
 } from '../api';
+import {
+  StoredConversation,
+  getLocalConversations,
+  mergeFromServer,
+  removeLocalConversation,
+} from '../historyStorage';
 
 interface Props {
   /** The currently active conversation_id — that row gets the highlight. */
   activeId: string;
   /** Click on a row in the sidebar. Caller switches to that conversation. */
   onSelect: (id: string) => void;
-  /** Bumped externally to force a refresh (e.g. after a run finishes a new
-   * conversation should appear). */
+  /** Bumped externally to force a re-read of localStorage (e.g. after App.tsx
+   * called saveLocalConversation when a run completed). */
   refreshKey?: number;
   /** True while a run is in flight; we still allow switching but warn the
    * user (see the disabled style for non-active rows). */
@@ -46,50 +57,60 @@ export default function HistorySidebar({
   refreshKey,
   busy,
 }: Props) {
-  const [items, setItems] = useState<ConversationListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Initial state: synchronously read localStorage. This renders instantly
+  // — no loading skeleton, no network round-trip.
+  const [items, setItems] = useState<StoredConversation[]>(() =>
+    getLocalConversations(),
+  );
+  // For "从云端恢复" button — separate state so the button can show a spinner
+  // without affecting list rendering.
+  const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
+  // Re-read localStorage when refreshKey bumps. Effectively free (sync read).
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    listConversations()
-      .then((list) => {
-        if (cancelled) return;
-        setItems(list);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setError((e as Error).message);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setItems(getLocalConversations());
   }, [refreshKey]);
+
+  /** Pull the platform's authoritative list and merge into localStorage.
+   * Append-only — never overwrites or removes existing local rows. Used on
+   * a fresh device / cleared cache to recover historical conversations. */
+  async function handleCloudRestore() {
+    setRestoring(true);
+    setRestoreError(null);
+    try {
+      const server = await listConversations({ force: true });
+      mergeFromServer(server);
+      setItems(getLocalConversations());
+    } catch (e) {
+      setRestoreError((e as Error).message);
+    } finally {
+      setRestoring(false);
+    }
+  }
 
   async function handleDelete(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    // Optimistic remove from list — feels snappier than waiting on the
-    // round-trip. We pull from list immediately; on failure we re-fetch.
+    // Optimistic remove from BOTH UI state and localStorage.
     setItems((prev) => prev.filter((x) => x.id !== id));
+    removeLocalConversation(id);
+    // Drop the api.ts module cache too — relevant if the user later hits
+    // "从云端恢复" within the 30s TTL (otherwise the deleted row would
+    // re-appear from a stale cache entry).
+    invalidateConversationCache();
     try {
       await deleteConversation(id);
       // If the deleted one was active, caller should have moved on already
       // (we don't call onNewSession from here — that's an explicit user
       // action, not a side-effect of cleanup).
     } catch {
-      // Rollback on error
-      try {
-        const fresh = await listConversations();
-        setItems(fresh);
-      } catch {
-        /* ignore */
-      }
+      // Rollback on error: re-read localStorage. Note: we already removed
+      // the row from localStorage above. We could re-insert here, but the
+      // platform delete failure is rare enough that asking the user to
+      // retry is acceptable; for now we let it stay removed locally.
+      // Surface via error toast in a future iteration if it becomes an
+      // issue.
+      setItems(getLocalConversations());
     }
   }
 
@@ -102,24 +123,30 @@ export default function HistorySidebar({
         </h2>
       </div>
 
-      {loading && (
-        <div style={statusRow}>
-          <IconSpinner size={11} />
-          <span>加载中...</span>
-        </div>
-      )}
-      {error && (
+      {restoreError && (
         <div style={{ ...statusRow, color: tokens.color.danger }}>
           <Icon name="alert-circle" size={11} />
-          <span>{error}</span>
+          <span>{restoreError}</span>
         </div>
       )}
-      {!loading && !error && items.length === 0 && (
+      {items.length === 0 && (
         <div style={emptyHint}>
           <div style={emptyTitle}>暂无历史</div>
           <div style={emptySub}>
             点击「仅分类」或「处理待回邮件」开始,完成后会自动归档到这里
           </div>
+          {/* Cloud-restore button — only shown when the local index is empty
+              (new device or cleared cache). Pulls the platform-side
+              authoritative list and merges into localStorage. */}
+          <button
+            type="button"
+            onClick={handleCloudRestore}
+            disabled={restoring}
+            style={cloudRestoreBtn}
+          >
+            {restoring ? <IconSpinner size={12} /> : <Icon name="refresh-cw" size={12} />}
+            <span>{restoring ? '正在恢复...' : '从云端恢复历史会话'}</span>
+          </button>
         </div>
       )}
 
@@ -162,9 +189,7 @@ export default function HistorySidebar({
                 </button>
               </div>
               <div style={metaRow}>
-                <span>{relativeTime(item.lastMessageAt)}</span>
-                <span style={metaDivider}>·</span>
-                <span>{item.messageCount} 条</span>
+                <span>{relativeTime(item.updatedAt)}</span>
               </div>
             </li>
           );
@@ -300,10 +325,6 @@ const metaRow: React.CSSProperties = {
   fontFamily: tokens.font.mono,
 };
 
-const metaDivider: React.CSSProperties = {
-  opacity: 0.5,
-};
-
 const statusRow: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -330,4 +351,21 @@ const emptySub: React.CSSProperties = {
   fontSize: tokens.fontSize.xs,
   color: tokens.color.textSubtle,
   lineHeight: 1.5,
+};
+
+const cloudRestoreBtn: React.CSSProperties = {
+  marginTop: tokens.space[3],
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  padding: `${tokens.space[2]}px ${tokens.space[3]}px`,
+  background: tokens.color.brandSoft,
+  border: `1px solid ${tokens.color.brandBorder}`,
+  borderRadius: tokens.radius.md,
+  color: tokens.color.brand,
+  fontSize: tokens.fontSize.xs,
+  fontWeight: tokens.fontWeight.medium,
+  cursor: 'pointer',
+  alignSelf: 'flex-start',
 };
