@@ -119,7 +119,7 @@ export async function stopRun(conversationId: string): Promise<{ status: string 
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'pages-agent-conversation-id': conversationId,
+      'makers-conversation-id': conversationId,
     },
     body: JSON.stringify({ conversationId }),
   });
@@ -187,7 +187,7 @@ export interface ConversationDetail {
 async function postHistory(body: Record<string, unknown>, conversationId?: string): Promise<unknown> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (conversationId) {
-    headers['pages-agent-conversation-id'] = conversationId;
+    headers['makers-conversation-id'] = conversationId;
   }
   const res = await fetch('/email/history', {
     method: 'POST',
@@ -261,11 +261,9 @@ async function* streamSSE(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      // Platform-specific header — the EdgeOne Pages agent runtime resolves
-      // ``context.conversation_id`` from this header (or ``conversation-id``).
-      // It does NOT honor X-Conversation-Id. See sibling reference template
-      // ``langgraph-quiz-python/src/hooks/useQuizSSE.ts``.
-      'pages-agent-conversation-id': conversationId,
+      // Platform-specific header — the Makers agent runtime resolves
+      // ``context.conversation_id`` from this header.
+      'makers-conversation-id': conversationId,
     },
     body: JSON.stringify(body),
     signal,

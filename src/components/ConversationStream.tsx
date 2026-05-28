@@ -305,7 +305,7 @@ function OnboardingPanel() {
       <div style={onboardingInner}>        <div style={heroPanel}>
           <div style={heroBadge}>
             <Icon name="sparkles" size={12} />
-            <span>EdgeOne Pages Agent · 邮件模板</span>
+            <span>Makers Agent · 邮件模板</span>
           </div>
           <h2 style={heroTitle}>用 AI 处理一整天的收件箱</h2>
           {/* <p style={heroSub}>

@@ -16,8 +16,7 @@ Both share the same env vars:
   - ``AI_GATEWAY_API_KEY``
   - ``AI_GATEWAY_BASE_URL``
 
-The default model and the ``X-Gateway-Quota-Bypass`` header match the
-sibling ``marketing-campaign-planner-crewai`` template so platform-wide
+The default model matches the sibling templates so platform-wide
 model strategy stays unified.
 
 Imports are deferred so unit tests that only touch parsing / state don't
@@ -34,9 +33,7 @@ REQUIRED_ENV = ("AI_GATEWAY_API_KEY", "AI_GATEWAY_BASE_URL")
 # model strategy stays unified.
 DEFAULT_MODEL = "@makers/deepseek-v4-flash"
 
-GATEWAY_HEADERS: dict[str, str] = {
-    "X-Gateway-Quota-Bypass": "true",
-}
+GATEWAY_HEADERS: dict[str, str] = {}
 
 
 # ─── Module-level singletons ────────────────────────────────────────────────

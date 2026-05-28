@@ -17,5 +17,5 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
-README.md
 PROGRESS.md
+doc.md
