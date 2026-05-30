@@ -1297,7 +1297,7 @@ export default function App() {
             <button
               onClick={() => setShowAiConfirm(true)}
               disabled={running || restoring || !initialized}
-              style={ghostBtn}
+              style={primaryBtn}
               title="AI 挑出最该回的邮件，逐封起草并等你审批"
             >
               <Icon name="sparkles" size={14} />
