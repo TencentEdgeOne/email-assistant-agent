@@ -27,6 +27,7 @@ import HistorySidebar from './components/HistorySidebar';
 import NodeFlowVisualizer from './components/NodeFlowVisualizer';
 import {
   getConversation,
+  getEmailProvider,
   invalidateConversationCache,
   runEmailAssistant,
   stopRun as apiStopRun,
@@ -488,6 +489,9 @@ export default function App() {
    * the user sees the OnboardingPanel for ~200ms and then it abruptly
    * swaps to the restored timeline. */
   const [initialized, setInitialized] = useState(false);
+  /** Current email provider detected from backend health endpoint.
+   * Drives the onboarding panel's data-source indicator. */
+  const [emailProvider, setEmailProvider] = useState<string>('mock');
   /** Latest narration line emitted by a node (via stream_mode="custom").
    * Renders as a live chip at the bottom of the conversation column so the
    * user sees what the backend is doing during long ops (classify ~10s,
@@ -1158,6 +1162,8 @@ export default function App() {
     void restoreSession(id, { silent: true }).finally(() => {
       setInitialized(true);
     });
+    // Detect email provider for the onboarding panel data-source indicator
+    void getEmailProvider().then(setEmailProvider);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1385,6 +1391,7 @@ export default function App() {
             progress={progress}
             streamingText={streamingText}
             restoring={restoring}
+            emailProvider={emailProvider}
           />
         ) : (
           // Mount-time loading. Without this gate the user briefly sees the

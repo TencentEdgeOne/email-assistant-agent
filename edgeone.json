@@ -8,16 +8,5 @@
     "slug": "email-assistant",
     "framework": "langgraph",
     "timeout": 1800
-  },
-  "agent": {
-    "schedules": [
-      {
-        "name": "morning-digest",
-        "cron": "0 8 * * *",
-        "path": "/email/scheduled",
-        "payload": { "task": "daily_digest" },
-        "timeout": 600
-      }
-    ]
   }
 }

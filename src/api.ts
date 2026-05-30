@@ -251,6 +251,17 @@ export async function deleteConversation(id: string): Promise<{ deleted: boolean
   return (await postHistory({ action: 'delete', id }, id)) as { deleted: boolean };
 }
 
+/** Fetch the health endpoint to detect current email provider (mock/imap/gmail). */
+export async function getEmailProvider(): Promise<string> {
+  try {
+    const res = await fetch('/email/health', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const data = (await res.json()) as { emailProvider?: string };
+    return data.emailProvider || 'mock';
+  } catch {
+    return 'mock';
+  }
+}
+
 async function* streamSSE(
   path: string,
   body: unknown,

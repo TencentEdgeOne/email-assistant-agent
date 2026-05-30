@@ -281,6 +281,11 @@ export default function EmailInboxTree({
           />
         ))}
       </div>
+      {/* Interaction hint — subtle, persistent nudge for first-time users */}
+      <div style={interactionHint}>
+        <Icon name="info" size={11} />
+        <span>点击邮件查看详情，悬停显示「处理」按钮</span>
+      </div>
     </aside>
   );
 }
@@ -859,4 +864,16 @@ const skeletonBar: React.CSSProperties = {
   background: `linear-gradient(90deg, ${tokens.color.surface} 25%, ${tokens.color.surfaceHover} 50%, ${tokens.color.surface} 75%)`,
   backgroundSize: '200px 100%',
   animation: 'shimmer 1.5s ease-in-out infinite',
+};
+
+const interactionHint: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: `${tokens.space[2]}px ${tokens.space[3]}px`,
+  fontSize: tokens.fontSize.xs,
+  color: tokens.color.textSubtle,
+  borderTop: `1px solid ${tokens.color.borderSubtle}`,
+  marginTop: 'auto',
+  flexShrink: 0,
 };

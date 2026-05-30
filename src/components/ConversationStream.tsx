@@ -55,13 +55,11 @@ interface Props {
    * replaced by a real timeline message once the phase completes (done
    * event for summary; human_review_required for draft). */
   streamingText?: { phase: 'summarize' | 'draft'; text: string } | null;
-  /** True while App.tsx is hydrating a previously-stored conversation
-   * (user clicked a row in the history sidebar). Renders a skeleton
-   * placeholder INSTEAD of all other content (messages, OnboardingPanel,
-   * pendingDraft, streamingText, progress pill) so the user never sees
-   * stale content from the previous session OR the empty OnboardingPanel
-   * during the ~200-500ms /email/history fetch. */
+  /** True while App.tsx is hydrating a previously-stored conversation. */
   restoring?: boolean;
+  /** Current email provider detected from backend: 'mock' | 'imap' | 'gmail'.
+   * Drives the data-source indicator on the OnboardingPanel. */
+  emailProvider?: string;
 }
 
 export default function ConversationStream({
@@ -72,6 +70,7 @@ export default function ConversationStream({
   progress,
   streamingText,
   restoring,
+  emailProvider,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -149,7 +148,7 @@ export default function ConversationStream({
   if (messages.length === 0 && !pendingDraft && !streamingText) {
     return (
       <main style={shell}>
-        <OnboardingPanel />
+        <OnboardingPanel emailProvider={emailProvider} />
       </main>
     );
   }
@@ -299,90 +298,69 @@ function RestoringSkeleton() {
   );
 }
 
-function OnboardingPanel() {
+function OnboardingPanel({ emailProvider }: { emailProvider?: string }) {
+  const isLive = emailProvider === 'imap' || emailProvider === 'gmail';
+  const providerLabel = emailProvider === 'imap' ? 'IMAP 邮箱' : emailProvider === 'gmail' ? 'Gmail' : '模拟数据';
   return (
     <div style={onboardingShell}>
-      <div style={onboardingInner}>        <div style={heroPanel}>
-          <div style={heroBadge}>
-            <Icon name="sparkles" size={12} />
-            <span>Makers Agent · 邮件模板</span>
+      <div style={onboardingInner}>
+        <div style={heroPanel}>
+          <h2 style={heroTitle}>邮件处理助手</h2>
+          <p style={heroDesc}>
+            自动拉取邮件 → 智能分类 → AI 起草回复 → 你来审批
+          </p>
+        </div>
+
+        {/* Data source indicator — dynamic based on backend EMAIL_PROVIDER */}
+        <div style={dataSourcePanel}>
+          <div style={dataSourceHeader}>
+            <Icon name="folder" size={13} />
+            <span>数据来源</span>
+            <span style={{
+              ...dataSourceBadge,
+              background: isLive ? tokens.color.successSoft : tokens.color.surface,
+              color: isLive ? tokens.color.success : tokens.color.textSubtle,
+              border: `1px solid ${isLive ? '#bbf7d0' : tokens.color.border}`,
+            }}>
+              {providerLabel}
+            </span>
           </div>
-          <h2 style={heroTitle}>用 AI 处理一整天的收件箱</h2>
-          {/* <p style={heroSub}>
-            自动拉取、按 9 大类分类、按重要性排序,然后由三个 CrewAI Agent 协作
-            起草回复 — 每封都暂停等你审批,看着喜欢就 ✓,不行就让它重写。
-          </p> */}
-          {/* <div style={heroMeta}>
-            <span style={metaPill}>
-              <Icon name="check-circle" size={11} />
-              零外部依赖,直接跑
-            </span>
-            <span style={metaPill}>
-              <Icon name="archive" size={11} />
-              只写 Drafts,不真发
-            </span>
-            <span style={metaPill}>
-              <Icon name="rotate-ccw" size={11} />
-              checkpointer 跨进程
-            </span>
-          </div> */}
+          <p style={dataSourceBody}>
+            {isLive
+              ? `已连接${providerLabel}，将从你的真实收件箱拉取邮件。`
+              : '当前使用模拟数据（10 封预设邮件），可直接体验完整流程。如需连接真实邮箱，请在环境变量中配置 IMAP 信息，详见 README。'}
+          </p>
+          <div style={ctaRow}>
+            <div style={ctaCard}>
+              <div style={ctaCardTitle}>
+                <Icon name="sparkles" size={13} />
+                <span>仅分类</span>
+              </div>
+              <div style={ctaCardDesc}>快速预览分类结果</div>
+            </div>
+            <div style={ctaCard}>
+              <div style={ctaCardTitle}>
+                <Icon name="send" size={13} />
+                <span>处理待回邮件</span>
+              </div>
+              <div style={ctaCardDesc}>起草回复 + 逐封审批</div>
+            </div>
+          </div>
+          <p style={ctaHintText}>
+            ↑ 点击上方工具栏中对应按钮开始。处理完成后，点击左栏邮件可查看详情和草稿。
+          </p>
         </div>
 
         <div style={stepsHeader}>
-          <span style={stepsEyebrow}>工作流</span>
-          <span style={stepsTitle}>邮件从拉取到回复的 5 步</span>
+          <span style={stepsTitle}>工作流程</span>
         </div>
         <ol style={steps}>
-          <Step
-            icon="inbox"
-            title="拉取 + 分类"
-            body="按 9 大类(紧急客户 / 会议 / 营销 / 通知 / ...)给每封邮件打标签,自动归档营销邮件。"
-          />
-          <Step
-            icon="sparkles"
-            title="优先级排序"
-            body="VIP 域名 +20、ICS 邀请 +10、紧急客户 ×1.2 倍权重。低优先级 + 不需要回复的会被丢弃。"
-          />
-          <Step
-            icon="edit-3"
-            title="CrewAI 三角色协作起草"
-            body="filter → writer → polisher 三个 Agent 接力写回复,语气"
-          />
-          {/* 从checkpoint恢复？ */}
-          <Step
-            icon="pause"
-            title="人工审批(HITL)"
-            body="LangGraph 在审批节点 interrupt() 暂停 → 你按通过 / 重写 / 不回复 / 跳过。"
-          />
-          <Step
-            icon="receipt"
-            title="生成摘要"
-            body="LLM 整合所有处理结果输出摘要"
-          />
+          <Step icon="inbox" title="拉取 & 分类" body="从收件箱获取邮件，按 9 类标签自动归类" />
+          <Step icon="sparkles" title="智能排序" body="基于发件人权重、紧急程度和上下文自动排优先级" />
+          <Step icon="edit-3" title="AI 起草回复" body="三个 Agent 角色协作：筛选 → 撰写 → 润色" />
+          <Step icon="pause" title="人工审批" body="每封草稿暂停等你确认：通过 / 编辑 / 驳回 / 重写" />
+          <Step icon="receipt" title="摘要报告" body="所有处理完成后生成当日邮件处理总结" />
         </ol>
-
-        {/* <div style={tipPanel}>
-          <div style={tipHeader}>
-            <Icon name="lightbulb" size={14} />
-            <span>开始之前</span>
-          </div>
-          <ul style={tipList}>
-            <li>设 <code style={code}>EMAIL_PROVIDER=imap</code> + Gmail App Password 即可接真实邮箱</li>
-            <li>左栏是分类后的收件箱,中栏是对话流,右栏是 LangGraph 流水线状态</li>
-            <li>切任务时复用上次结果,fetch + classify 自动 short-circuit</li>
-            <li>左栏每封邮件都可以「↩ 处理」单独跑(单封不出总结)</li>
-          </ul>
-        </div> */}
-{/* 
-        <div style={ctaHint}>
-          <Icon name="arrow-up-right" size={14} />
-          <div>
-            <div style={ctaTitle}>选择上方任一按钮开始</div>
-            <div style={ctaSub}>
-              「仅分类」适合快速预览;「每日摘要」走完整 HITL 流程
-            </div>
-          </div>
-        </div> */}
       </div>
     </div>
   );
@@ -412,7 +390,10 @@ function MessageRow({ m }: { m: StreamMessage }) {
           background: KIND_BG[m.kind],
           color: KIND_FG[m.kind],
           borderColor: KIND_BORDER[m.kind],
-          maxWidth: m.kind === 'summary' ? '100%' : '85%',
+          // User decisions (approval actions) are narrow chat bubbles on the
+          // right. All other message kinds (system, pipeline, summary, etc.)
+          // span the full available width so content doesn't look cramped.
+          maxWidth: isUser ? '75%' : '100%',
         }}
       >
         <div style={kindLabel}>
@@ -868,127 +849,63 @@ const onboardingShell: React.CSSProperties = {
 
 const onboardingInner: React.CSSProperties = {
   width: '100%',
-  maxWidth: 680,
+  maxWidth: 560,
   display: 'flex',
   flexDirection: 'column',
-  gap: tokens.space[5],
+  gap: tokens.space[6],
 };
 
 const heroPanel: React.CSSProperties = {
-  // Use flex + gap for layout instead of relying on each child's margin —
-  // an earlier version had ``overflow: hidden`` + ``position: relative`` +
-  // per-child margins that combined with some browsers' default
-  // margin-collapse rules to produce a "card with only the badge visible"
-  // outcome. Flex column with explicit gaps is bullet-proof.
   display: 'flex',
   flexDirection: 'column',
-  gap: tokens.space[3],
-  background: tokens.color.gradientBrand,
-  border: `1px solid ${tokens.color.brandBorder}`,
-  borderRadius: tokens.radius.xl,
-  padding: `${tokens.space[6]}px ${tokens.space[5]}px`,
-};
-
-const heroBadge: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '4px 10px',
-  background: 'rgba(255,255,255,0.7)',
-  border: `1px solid ${tokens.color.brandBorder}`,
-  borderRadius: tokens.radius.pill,
-  fontSize: tokens.fontSize.xs,
-  fontFamily: tokens.font.mono,
-  color: tokens.color.brand,
-  fontWeight: tokens.fontWeight.medium,
-  // ``alignSelf: flex-start`` keeps the pill from stretching across the
-  // full panel width when its parent is flex-column.
-  alignSelf: 'flex-start',
+  gap: tokens.space[2],
 };
 
 const heroTitle: React.CSSProperties = {
-  // No vertical margin — flex parent's ``gap`` handles spacing.
   margin: 0,
   fontSize: tokens.fontSize['2xl'],
-  fontWeight: tokens.fontWeight.bold,
+  fontWeight: tokens.fontWeight.semibold,
   color: tokens.color.text,
-  letterSpacing: '-0.02em',
-  lineHeight: 1.25,
+  letterSpacing: '-0.03em',
+  lineHeight: 1.2,
 };
 
-const heroSub: React.CSSProperties = {
-  // No vertical margin — flex parent's ``gap`` handles spacing.
+const heroDesc: React.CSSProperties = {
   margin: 0,
   fontSize: tokens.fontSize.md,
-  // Was ``textMuted`` — too faint against the brand gradient. ``text``
-  // (near-black) reads cleanly across the lavender gradient.
-  color: tokens.color.text,
-  lineHeight: 1.65,
-};
-
-const heroMeta: React.CSSProperties = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: tokens.space[2],
-  // No marginTop — flex parent's ``gap`` already separates this from the
-  // subtitle paragraph. We just want a bit more breathing room before the
-  // pills, so override the gap by giving heroPanel a smaller default gap
-  // and putting the extra here.
-  marginTop: tokens.space[2],
-};
-
-const metaPill: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 5,
-  padding: '4px 10px',
-  background: tokens.color.surfaceElevated,
-  border: `1px solid ${tokens.color.borderSubtle}`,
-  borderRadius: tokens.radius.pill,
-  fontSize: tokens.fontSize.xs,
-  color: tokens.color.textMuted,
-  fontWeight: tokens.fontWeight.medium,
+  color: tokens.color.textSubtle,
+  lineHeight: 1.6,
 };
 
 const stepsHeader: React.CSSProperties = {
   display: 'flex',
-  flexDirection: 'column',
-  gap: 2,
-  marginTop: tokens.space[2],
-};
-
-const stepsEyebrow: React.CSSProperties = {
-  fontSize: tokens.fontSize.xs,
-  fontFamily: tokens.font.mono,
-  color: tokens.color.brand,
-  textTransform: 'uppercase',
-  letterSpacing: '0.08em',
-  fontWeight: tokens.fontWeight.semibold,
+  alignItems: 'center',
 };
 
 const stepsTitle: React.CSSProperties = {
-  fontSize: tokens.fontSize.lg,
+  fontSize: tokens.fontSize.base,
   fontWeight: tokens.fontWeight.semibold,
   color: tokens.color.text,
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
 };
 
 const steps: React.CSSProperties = {
   listStyle: 'none',
   margin: 0,
-  padding: tokens.space[4],
+  padding: 0,
   display: 'flex',
   flexDirection: 'column',
-  gap: tokens.space[3],
-  background: tokens.color.surfaceElevated,
-  border: `1px solid ${tokens.color.borderSubtle}`,
-  borderRadius: tokens.radius.lg,
-  boxShadow: tokens.shadow.sm,
+  gap: 2,
 };
 
 const stepRow: React.CSSProperties = {
   display: 'flex',
   alignItems: 'flex-start',
   gap: tokens.space[3],
+  padding: `${tokens.space[3]}px ${tokens.space[3]}px`,
+  borderRadius: tokens.radius.md,
+  transition: 'background 150ms ease',
 };
 
 const stepBadge: React.CSSProperties = {
@@ -996,89 +913,96 @@ const stepBadge: React.CSSProperties = {
   width: 28,
   height: 28,
   borderRadius: tokens.radius.md,
-  background: tokens.color.brandSoft,
-  color: tokens.color.brand,
-  border: `1px solid ${tokens.color.brandBorder}`,
+  background: tokens.color.surface,
+  color: tokens.color.textMuted,
+  border: `1px solid ${tokens.color.border}`,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
 };
 
 const stepTitle: React.CSSProperties = {
-  fontSize: tokens.fontSize.md,
-  fontWeight: tokens.fontWeight.semibold,
+  fontSize: tokens.fontSize.base,
+  fontWeight: tokens.fontWeight.medium,
   color: tokens.color.text,
-  marginBottom: 2,
+  marginBottom: 1,
 };
 
 const stepBody: React.CSSProperties = {
-  fontSize: tokens.fontSize.base,
-  color: tokens.color.textMuted,
+  fontSize: tokens.fontSize.sm,
+  color: tokens.color.textSubtle,
   lineHeight: tokens.lineHeight.snug,
 };
 
-const tipPanel: React.CSSProperties = {
-  background: tokens.color.warningSoft,
-  border: `1px solid #fde68a`,
-  borderRadius: tokens.radius.lg,
-  padding: tokens.space[3],
-  fontSize: tokens.fontSize.base,
-  color: tokens.color.text,
-};
-
-const tipHeader: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: tokens.space[2],
-  fontWeight: tokens.fontWeight.semibold,
-  color: '#854d0e',
-  fontSize: tokens.fontSize.md,
-  marginBottom: tokens.space[2],
-};
-
-const tipList: React.CSSProperties = {
-  margin: 0,
-  paddingLeft: tokens.space[5],
+const dataSourcePanel: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 6,
-  color: tokens.color.textMuted,
-  lineHeight: tokens.lineHeight.snug,
-};
-
-const code: React.CSSProperties = {
-  fontFamily: tokens.font.mono,
-  fontSize: tokens.fontSize.sm,
-  background: tokens.color.bg,
-  padding: '1px 6px',
-  borderRadius: tokens.radius.sm,
+  gap: tokens.space[3],
+  padding: tokens.space[4],
+  background: tokens.color.surface,
   border: `1px solid ${tokens.color.border}`,
-  color: tokens.color.brand,
+  borderRadius: tokens.radius.md,
 };
 
-const ctaHint: React.CSSProperties = {
+const dataSourceHeader: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: tokens.space[3],
-  padding: `${tokens.space[3]}px ${tokens.space[4]}px`,
-  background: tokens.color.brandSoft,
-  border: `1px dashed ${tokens.color.brandBorder}`,
-  borderRadius: tokens.radius.lg,
-  color: tokens.color.brand,
-  fontWeight: tokens.fontWeight.medium,
+  gap: 6,
+  fontSize: tokens.fontSize.sm,
+  fontWeight: tokens.fontWeight.semibold,
+  color: tokens.color.text,
+  textTransform: 'uppercase',
+  letterSpacing: '0.03em',
 };
 
-const ctaTitle: React.CSSProperties = {
-  fontSize: tokens.fontSize.md,
-  fontWeight: tokens.fontWeight.semibold,
-  color: tokens.color.brand,
+const dataSourceBadge: React.CSSProperties = {
+  fontSize: tokens.fontSize.xs,
+  fontWeight: tokens.fontWeight.medium,
+  padding: '2px 8px',
+  borderRadius: tokens.radius.pill,
+  marginLeft: 'auto',
+};
+
+const dataSourceBody: React.CSSProperties = {
+  margin: 0,
+  fontSize: tokens.fontSize.sm,
+  color: tokens.color.textSubtle,
+  lineHeight: 1.6,
+};
+
+const ctaRow: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: tokens.space[2],
+};
+
+const ctaCard: React.CSSProperties = {
+  padding: `${tokens.space[3]}px ${tokens.space[3]}px`,
+  border: `1px solid ${tokens.color.border}`,
+  borderRadius: tokens.radius.md,
+  background: tokens.color.bg,
+};
+
+const ctaCardTitle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 5,
+  fontSize: tokens.fontSize.base,
+  fontWeight: tokens.fontWeight.medium,
+  color: tokens.color.text,
   marginBottom: 2,
 };
 
-const ctaSub: React.CSSProperties = {
-  fontSize: tokens.fontSize.sm,
-  color: tokens.color.textMuted,
-  fontWeight: tokens.fontWeight.regular,
+const ctaCardDesc: React.CSSProperties = {
+  fontSize: tokens.fontSize.xs,
+  color: tokens.color.textSubtle,
+};
+
+const ctaHintText: React.CSSProperties = {
+  margin: 0,
+  fontSize: tokens.fontSize.xs,
+  color: tokens.color.textSubtle,
+  lineHeight: 1.5,
 };
 
 const inlineCard: React.CSSProperties = {
