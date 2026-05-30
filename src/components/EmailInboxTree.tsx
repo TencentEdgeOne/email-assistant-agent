@@ -139,10 +139,10 @@ export default function EmailInboxTree({
       ? '正在拉取邮件...'
       : '等待拉取邮件';
     const hint = classifying
-      ? '后端正在用 LLM 给每封邮件打类别和优先级,几秒后会列出来'
+      ? '正在给每封邮件打类别和优先级'
       : refreshing
-      ? '后端正在从你的邮箱获取最新内容'
-      : '点击上方「仅分类」或「处理待回邮件」开始';
+      ? '正在从你的邮箱获取最新内容'
+      : '点击上方「拉取邮件」或「AI智能处理」开始';
     return (
       <aside style={shell}>
         <h2 style={heading}>

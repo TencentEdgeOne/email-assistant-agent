@@ -307,59 +307,40 @@ function OnboardingPanel({ emailProvider }: { emailProvider?: string }) {
         <div style={heroPanel}>
           <h2 style={heroTitle}>邮件处理助手</h2>
           <p style={heroDesc}>
-            自动拉取邮件 → 智能分类 → AI 起草回复 → 你来审批
+            AI 帮你分类邮件、起草回复，你来拍板
           </p>
         </div>
 
-        {/* Data source indicator — dynamic based on backend EMAIL_PROVIDER */}
+        {/* Data source status */}
         <div style={dataSourcePanel}>
-          <div style={dataSourceHeader}>
-            <Icon name="folder" size={13} />
-            <span>数据来源</span>
-            <span style={{
-              ...dataSourceBadge,
-              background: isLive ? tokens.color.successSoft : tokens.color.surface,
-              color: isLive ? tokens.color.success : tokens.color.textSubtle,
-              border: `1px solid ${isLive ? '#bbf7d0' : tokens.color.border}`,
-            }}>
-              {providerLabel}
-            </span>
-          </div>
+          <span style={{
+            ...dataSourceBadge,
+            background: isLive ? tokens.color.successSoft : tokens.color.surface,
+            color: isLive ? tokens.color.success : tokens.color.textSubtle,
+            border: `1px solid ${isLive ? '#bbf7d0' : tokens.color.border}`,
+            marginLeft: 0,
+            width: '110px',
+          }}>
+            {isLive ? `✓ 已连接 ${providerLabel}` : '⚡ 模拟数据模式'}
+          </span>
           <p style={dataSourceBody}>
             {isLive
-              ? `已连接${providerLabel}，将从你的真实收件箱拉取邮件。`
-              : '当前使用模拟数据（10 封预设邮件），可直接体验完整流程。如需连接真实邮箱，请在环境变量中配置 IMAP 信息，详见 README。'}
-          </p>
-          <div style={ctaRow}>
-            <div style={ctaCard}>
-              <div style={ctaCardTitle}>
-                <Icon name="sparkles" size={13} />
-                <span>仅分类</span>
-              </div>
-              <div style={ctaCardDesc}>快速预览分类结果</div>
-            </div>
-            <div style={ctaCard}>
-              <div style={ctaCardTitle}>
-                <Icon name="send" size={13} />
-                <span>处理待回邮件</span>
-              </div>
-              <div style={ctaCardDesc}>起草回复 + 逐封审批</div>
-            </div>
-          </div>
-          <p style={ctaHintText}>
-            ↑ 点击上方工具栏中对应按钮开始。处理完成后，点击左栏邮件可查看详情和草稿。
+              ? '将从你的真实收件箱拉取邮件。'
+              : '未检测到 IMAP 配置，将使用 10 封模拟邮件。配置环境变量可接入真实邮箱。'}
           </p>
         </div>
 
-        <div style={stepsHeader}>
-          <span style={stepsTitle}>工作流程</span>
+        {/* AI auto-process hint */}
+        <div style={aiHintPanel}>
+          <Icon name="sparkles" size={13} />
+          <span>不确定要处理哪些？点击工具栏「AI 智能处理」，AI 帮你挑选最该回复的邮件</span>
         </div>
+
+        {/* Simple 3-step guide */}
         <ol style={steps}>
-          <Step icon="inbox" title="拉取 & 分类" body="从收件箱获取邮件，按 9 类标签自动归类" />
-          <Step icon="sparkles" title="智能排序" body="基于发件人权重、紧急程度和上下文自动排优先级" />
-          <Step icon="edit-3" title="AI 起草回复" body="三个 Agent 角色协作：筛选 → 撰写 → 润色" />
-          <Step icon="pause" title="人工审批" body="每封草稿暂停等你确认：通过 / 编辑 / 驳回 / 重写" />
-          <Step icon="receipt" title="摘要报告" body="所有处理完成后生成当日邮件处理总结" />
+          <Step icon="inbox" title="拉取邮件" body="点击上方「拉取邮件」获取收件箱内容" />
+          <Step icon="edit-3" title="选择处理" body="点击左栏任意邮件的「起草回复」，AI 自动撰写" />
+          <Step icon="check-circle" title="审批确认" body="通过 / 编辑 / 驳回 — 你拥有最终决定权" />
         </ol>
       </div>
     </div>
@@ -937,11 +918,24 @@ const stepBody: React.CSSProperties = {
 const dataSourcePanel: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: tokens.space[3],
-  padding: tokens.space[4],
+  gap: tokens.space[2],
+  padding: tokens.space[3],
   background: tokens.color.surface,
   border: `1px solid ${tokens.color.border}`,
   borderRadius: tokens.radius.md,
+};
+
+const aiHintPanel: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: tokens.space[2],
+  padding: `${tokens.space[3]}px ${tokens.space[3]}px`,
+  background: tokens.color.surface,
+  border: `1px solid ${tokens.color.border}`,
+  borderRadius: tokens.radius.md,
+  fontSize: tokens.fontSize.sm,
+  color: tokens.color.textMuted,
+  lineHeight: 1.5,
 };
 
 const dataSourceHeader: React.CSSProperties = {

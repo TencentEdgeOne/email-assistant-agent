@@ -146,15 +146,13 @@ input:focus {
   border-color: #e5e5e5 !important;
 }
 
-/* Show the process button only on hover — keeps the row clean by default */
+/* Process button — always visible so users know rows are actionable */
 [data-email-row] [data-process-btn] {
-  opacity: 0;
-  transform: translateX(4px);
-  transition: opacity 150ms ease, transform 150ms ease;
+  opacity: 0.7;
+  transition: opacity 150ms ease;
 }
 [data-email-row]:hover [data-process-btn] {
   opacity: 1;
-  transform: translateX(0);
 }
 
 /* Resize handle between inbox and main columns */

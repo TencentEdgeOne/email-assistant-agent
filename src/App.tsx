@@ -238,9 +238,14 @@ function pipelineReducer(state: PipelineState, action: PipelineAction): Pipeline
         // for review when we know we're mid-regenerate (signaled by
         // state.nodeStatuses.draft === 'active' — ONLY the regenerate
         // action puts draft in this state while review is happening).
+        // Similarly, suppress ``apply=done`` when draft is currently active
+        // — the apply patch is a residual from the PREVIOUS iteration that
+        // arrived after the new draft already started (LangGraph updates
+        // stream is not strictly ordered within loop-backs).
+        // Note: a final LOOP coherence guard below catches any remaining
+        // edge cases after all patches are processed.
         const suppressDone =
-          nodeName === 'review' &&
-          state.nodeStatuses.draft === 'active';
+          nodeName === 'review' && state.nodeStatuses.draft === 'active';
 
         if (!suppressDone) {
           // Mark this node done…
@@ -324,6 +329,23 @@ function pipelineReducer(state: PipelineState, action: PipelineAction): Pipeline
           }
         }
       }
+
+      // ── Final sanity: LOOP coherence guard ────────────────────────────
+      // The pipeline is a loop (draft → review → apply → draft|summarize).
+      // Due to stream ordering non-determinism, a residual `apply=done`
+      // from the previous iteration can slip through AFTER `draft` was
+      // already set to `active` for the current iteration. This guard runs
+      // AFTER all patches have been processed and enforces a single rule:
+      //
+      //   If draft is active, then review/apply/summarize CANNOT be done.
+      //
+      // This eliminates the visual glitch of "起草=进行中 + 应用=完成".
+      if (next.nodeStatuses.draft === 'active') {
+        if (next.nodeStatuses.review === 'done') next.nodeStatuses.review = 'pending';
+        if (next.nodeStatuses.apply === 'done') next.nodeStatuses.apply = 'pending';
+        if (next.nodeStatuses.summarize === 'done') next.nodeStatuses.summarize = 'pending';
+      }
+
       return next;
     }
     case 'paused':
@@ -484,6 +506,8 @@ export default function App() {
   /** Drawer open/close state — owned here so we can auto-close after
    * picking a row or clicking "新会话". */
   const [historyOpen, setHistoryOpen] = useState(false);
+  /** Controls the custom confirmation modal for "AI 智能处理". */
+  const [showAiConfirm, setShowAiConfirm] = useState(false);
   /** True after the mount-time restoreSession has resolved. Until then we
    * keep the conversation column in a loading state — without this gate,
    * the user sees the OnboardingPanel for ~200ms and then it abruptly
@@ -1233,6 +1257,7 @@ export default function App() {
   const showCounter = displayTotal > 0 && pipeline.currentTask !== 'single_reply';
 
   return (
+  <>
     <ChatLayout
       header={
         <div style={headerInner}>
@@ -1261,57 +1286,41 @@ export default function App() {
         <div style={toolbarInner}>
           <div style={toolbarGroup}>
             <button
-              onClick={() => startRun('triage_only')}
+              onClick={() => startRun('triage_only', { forceRefresh: true })}
               disabled={running || restoring || !initialized}
               style={primaryBtn}
-              title="只跑 fetch → classify → prioritize → summarize,不起草"
+              title="从邮箱拉取最新邮件并智能分类"
             >
-              <Icon name="sparkles" size={14} />
-              <span>仅分类</span>
+              <Icon name="inbox" size={14} />
+              <span>拉取邮件</span>
             </button>
             <button
-              onClick={() => startRun('daily_digest')}
+              onClick={() => setShowAiConfirm(true)}
               disabled={running || restoring || !initialized}
-              style={primaryBtnFilled}
-              title="完整流程 — 起草、逐封审批、保存到草稿,最后顺手生成日报。复用上次分类结果"
+              style={ghostBtn}
+              title="AI 挑出最该回的邮件，逐封起草并等你审批"
             >
-              <Icon name="send" size={14} />
-              <span>处理待回邮件</span>
+              <Icon name="sparkles" size={14} />
+              <span>AI 智能处理</span>
             </button>
             {running && (
               <button
                 type="button"
                 onClick={stopCurrentRun}
                 style={stopBtn}
-                title="发送停止信号 — 后端会在下一个节点边界优雅退出"
+                title="发送停止信号"
               >
                 <Icon name="x" size={13} strokeWidth={2.5} />
                 <span>停止</span>
               </button>
             )}
           </div>
-          <span style={toolbarDivider} aria-hidden />
-          <button
-            onClick={() =>
-              startRun(taskRef.current ?? 'triage_only', { forceRefresh: true })
-            }
-            disabled={running || restoring || !initialized}
-            style={ghostBtn}
-            title="重新从邮箱拉取最新邮件并分类(忽略缓存,重新拉取)"
-          >
-            <Icon name="refresh-cw" size={13} />
-            <span>重新拉取邮件</span>
-          </button>
-          {/* New session + history toggle pinned to the right end of the
-              toolbar so they sit next to the drawer that slides in from
-              the right. ``marginLeft: auto`` on the first one pushes the
-              whole pair past the action buttons. */}
           <button
             type="button"
             onClick={startNewSession}
             disabled={running || restoring || !initialized}
             style={{ ...newSessionBtn, marginLeft: 'auto' }}
-            title="开始一个新的对话(原会话保留在历史里)"
+            title="开始一个新的对话"
           >
             <Icon name="sparkles" size={13} />
             <span>新会话</span>
@@ -1414,6 +1423,39 @@ export default function App() {
         />
       }
     />
+
+    {/* AI 智能处理 confirmation modal */}
+    {showAiConfirm && (
+      <div style={modalBackdrop} onClick={() => setShowAiConfirm(false)}>
+        <div style={modalCard} onClick={(e) => e.stopPropagation()}>
+          <div style={modalIcon}>
+            <Icon name="sparkles" size={20} />
+          </div>
+          <h3 style={modalTitle}>AI 智能处理</h3>
+          <p style={modalBody}>
+            AI 将从你的收件箱中挑选需要回复的邮件，逐封起草回复并等待你审批。你可以随时停止。
+          </p>
+          <div style={modalActions}>
+            <button
+              style={modalCancelBtn}
+              onClick={() => setShowAiConfirm(false)}
+            >
+              取消
+            </button>
+            <button
+              style={modalConfirmBtn}
+              onClick={() => {
+                setShowAiConfirm(false);
+                startRun('daily_digest');
+              }}
+            >
+              开始处理
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
   );
 }
 
@@ -1605,6 +1647,91 @@ const newSessionBtn: React.CSSProperties = {
   border: `1px solid ${tokens.color.border}`,
   cursor: 'pointer',
   lineHeight: 1.2,
+};
+
+// ─── AI Confirm Modal ───────────────────────────────────────────────────────
+
+const modalBackdrop: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0, 0, 0, 0.4)',
+  backdropFilter: 'blur(4px)',
+  zIndex: 100,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
+const modalCard: React.CSSProperties = {
+  width: 380,
+  maxWidth: '90vw',
+  background: tokens.color.bg,
+  border: `1px solid ${tokens.color.border}`,
+  borderRadius: tokens.radius.xl,
+  padding: `${tokens.space[6]}px ${tokens.space[5]}px`,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: tokens.space[4],
+  boxShadow: tokens.shadow.pop,
+};
+
+const modalIcon: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  borderRadius: tokens.radius.lg,
+  background: tokens.color.surface,
+  border: `1px solid ${tokens.color.border}`,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: tokens.color.brand,
+};
+
+const modalTitle: React.CSSProperties = {
+  margin: 0,
+  fontSize: tokens.fontSize.lg,
+  fontWeight: tokens.fontWeight.semibold,
+  color: tokens.color.text,
+};
+
+const modalBody: React.CSSProperties = {
+  margin: 0,
+  fontSize: tokens.fontSize.base,
+  color: tokens.color.textMuted,
+  lineHeight: 1.6,
+  textAlign: 'center',
+};
+
+const modalActions: React.CSSProperties = {
+  display: 'flex',
+  gap: tokens.space[3],
+  width: '100%',
+  marginTop: tokens.space[2],
+};
+
+const modalCancelBtn: React.CSSProperties = {
+  flex: 1,
+  padding: '9px 16px',
+  borderRadius: tokens.radius.md,
+  border: `1px solid ${tokens.color.border}`,
+  background: tokens.color.bg,
+  color: tokens.color.textMuted,
+  fontSize: tokens.fontSize.base,
+  fontWeight: tokens.fontWeight.medium,
+  cursor: 'pointer',
+};
+
+const modalConfirmBtn: React.CSSProperties = {
+  flex: 1,
+  padding: '9px 16px',
+  borderRadius: tokens.radius.md,
+  border: `1px solid transparent`,
+  background: tokens.color.text,
+  color: tokens.color.textInverted,
+  fontSize: tokens.fontSize.base,
+  fontWeight: tokens.fontWeight.medium,
+  cursor: 'pointer',
 };
 
 // ─── Mount-time loading center ──────────────────────────────────────────────
