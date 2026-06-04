@@ -284,7 +284,7 @@ export default function EmailInboxTree({
       {/* Interaction hint — subtle, persistent nudge for first-time users */}
       <div style={interactionHint}>
         <Icon name="info" size={11} />
-        <span>点击邮件查看详情，悬停显示「处理」按钮</span>
+        <span>点击邮件查看详情</span>
       </div>
     </aside>
   );

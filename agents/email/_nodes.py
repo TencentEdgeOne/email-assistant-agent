@@ -509,7 +509,7 @@ async def draft_with_crew(state: EmailAssistantState, *, llm) -> dict:
     from _crew import build_email_draft_crew
     from _events import CrewProgressBridge
 
-    crew = build_email_draft_crew(
+    crew, inputs = build_email_draft_crew(
         llm,
         classified=ce,
         rules=rules,
@@ -523,8 +523,8 @@ async def draft_with_crew(state: EmailAssistantState, *, llm) -> dict:
         # The bridge schedules writer calls via call_soon_threadsafe, so
         # CrewAI's worker thread can publish events safely.
         with CrewProgressBridge(loop, write, email_subject=ce.email.subject):
-            # Tasks have all values inlined via f-strings, so kickoff takes no inputs
-            out = await asyncio.to_thread(crew.kickoff)
+            # YAML variables are filled by CrewAI at kickoff via inputs dict
+            out = await asyncio.to_thread(crew.kickoff, inputs=inputs)
     except Exception as exc:
         write({
             "phase": "draft",

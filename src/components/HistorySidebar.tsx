@@ -145,7 +145,7 @@ export default function HistorySidebar({
             style={cloudRestoreBtn}
           >
             {restoring ? <IconSpinner size={12} /> : <Icon name="refresh-cw" size={12} />}
-            <span>{restoring ? '正在恢复...' : '从云端恢复历史会话'}</span>
+            <span>{restoring ? '正在恢复...' : '刷新'}</span>
           </button>
         </div>
       )}

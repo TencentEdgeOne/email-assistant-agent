@@ -319,7 +319,8 @@ function OnboardingPanel({ emailProvider }: { emailProvider?: string }) {
             color: isLive ? tokens.color.success : tokens.color.textSubtle,
             border: `1px solid ${isLive ? '#bbf7d0' : tokens.color.border}`,
             marginLeft: 0,
-            width: '110px',
+            width: '120px',
+            textAlign: 'center',
           }}>
             {isLive ? `✓ 已连接 ${providerLabel}` : '⚡ 模拟数据模式'}
           </span>

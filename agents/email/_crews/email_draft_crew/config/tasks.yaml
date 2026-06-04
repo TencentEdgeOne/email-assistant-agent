@@ -1,0 +1,90 @@
+analyze_task:
+  description: >
+    Read this incoming email and produce a structured analysis.
+
+    EMAIL
+    -----
+    From: {email_sender}
+    Subject: {email_subject}
+    Has calendar invite: {has_ics}
+    Body:
+    {email_body}
+
+    CLASSIFIER OUTPUT
+    -----------------
+    Category: {category}
+    Why it needs reply: {reason}
+
+    Use the ``fetch_thread_history`` tool with thread_id
+    ``{email_thread_id}`` to check for prior context.
+
+    Produce a markdown brief with these sections:
+      1. Sender's true intent (1–2 sentences)
+      2. Key points the reply MUST address (numbered list, max 3)
+      3. Suggested reply template name if applicable (one of:
+         meeting-accept, meeting-decline, polite-followup,
+         customer-apology, or 'none')
+      4. Tone recommendation (formal | friendly_professional |
+         apologetic | urgent | concise) — explain why in one sentence
+  expected_output: >
+    A markdown brief with the four sections.
+
+draft_task:
+  description: >
+    Using the analyst's brief, draft the reply body.
+
+    If the brief's suggested template is not 'none', call
+    ``lookup_reply_template`` first and adapt it to this specific
+    email. Otherwise write from scratch.
+
+    Rules:
+      - Address every key point from the brief
+      - Lead with what the recipient cares about most
+      - No filler openers ('I hope this finds you well', 'Thanks for
+        reaching out')
+      - Stay under 200 words for routine replies, under 350 for
+        complex ones
+      - Reply in {language} (override the original email's language
+        if the user feedback below requests a specific language)
+      - Do NOT add a sign-off / signature — the polisher handles that
+      - This is an EMAIL BODY — write PLAIN TEXT prose only.
+        NO markdown formatting of any kind:
+           no **bold**, no ## headings, no backtick code,
+           no - bullet markers, no [text](url) links,
+           no tables, no horizontal rules.
+        Use natural paragraphs separated by blank lines.
+        For lists, write them as numbered prose.
+    {feedback_section}
+  expected_output: >
+    Plain-text email body. No markdown syntax. No sign-off, no JSON.
+
+polish_task:
+  description: >
+    Polish the writer's draft and emit a final JSON DraftItem.
+
+    Steps:
+      1. Call ``lookup_tone_guidance`` with the analyst's recommended
+         tone (or '{default_tone}' if 'none').
+      2. Adjust phrasing to match the tone — keep the SAME content;
+         only change HOW it's said.
+      3. Strip ALL markdown syntax from the body if the writer left any
+         behind. The body is plain text only.
+      4. Append the user's signature on its own line: '{signature}'
+      5. Output ONLY a JSON object with these EXACT field values
+         (copy the email_id / to / subject as-is):
+
+    {{
+      "email_id": "{email_id}",
+      "to": ["{email_sender}"],
+      "subject": "{reply_subject}",
+      "body": "<plain-text polished body + signature, no markdown>",
+      "tone": "<the tone you applied>",
+      "template_used": "<template name or null>",
+      "confidence": <0.0 to 1.0>,
+      "rationale": "<one sentence why this reply works>"
+    }}
+
+    Output ONLY the JSON. No markdown fences. No prose. The body field
+    MUST be plain text (use \n for paragraph breaks).
+  expected_output: >
+    A JSON object matching the DraftItem schema.
