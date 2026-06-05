@@ -1181,13 +1181,24 @@ export default function App() {
   // array is intentional, the refs / setters captured here are stable.
   // ``initialized`` flips to true regardless of success/failure so the UI
   // unblocks even if the network is dead.
+  //
+  // Optimisation: if the id has no local record (brand-new session or
+  // freshly generated UUID), skip the network round-trip entirely —
+  // there's nothing to restore, so we can render immediately.
   useEffect(() => {
     const id = getOrCreateSessionId();
     conversationIdRef.current = id;
     persistSessionId(id);
-    void restoreSession(id, { silent: true }).finally(() => {
+
+    const hasLocalRecord = getLocalConversations().some((c) => c.id === id);
+    if (hasLocalRecord) {
+      void restoreSession(id, { silent: true }).finally(() => {
+        setInitialized(true);
+      });
+    } else {
+      // Nothing to restore — unblock UI instantly.
       setInitialized(true);
-    });
+    }
     // Detect email provider for the onboarding panel data-source indicator
     void getEmailProvider().then(setEmailProvider);
     // eslint-disable-next-line react-hooks/exhaustive-deps
