@@ -21,6 +21,7 @@ import ConversationStream, {
   StreamMessage,
   StreamMessageKind,
 } from './components/ConversationStream';
+import DeployFAB from './components/DeployFAB';
 import EmailDetailDrawer from './components/EmailDetailDrawer';
 import EmailInboxTree from './components/EmailInboxTree';
 import HistorySidebar from './components/HistorySidebar';
@@ -1477,6 +1478,7 @@ export default function App() {
         </div>
       </div>
     )}
+    <DeployFAB />
   </>
   );
 }
