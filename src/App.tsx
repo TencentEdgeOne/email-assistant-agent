@@ -21,7 +21,7 @@ import ConversationStream, {
   StreamMessage,
   StreamMessageKind,
 } from './components/ConversationStream';
-import DeployFAB from './components/DeployFAB';
+import DeployButton, { GitHubButton } from './components/DeployFAB';
 import EmailDetailDrawer from './components/EmailDetailDrawer';
 import EmailInboxTree from './components/EmailInboxTree';
 import HistorySidebar from './components/HistorySidebar';
@@ -1286,8 +1286,10 @@ export default function App() {
               </span>
             </div>
           </div>
-          {/* Language toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.space[3] }}>
+          {/* Language toggle + Deploy + GitHub */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.space[2] }}>
+            <DeployButton />
+            <GitHubButton />
             <button
               type="button"
               onClick={toggleLocale}
@@ -1478,7 +1480,6 @@ export default function App() {
         </div>
       </div>
     )}
-    <DeployFAB />
   </>
   );
 }

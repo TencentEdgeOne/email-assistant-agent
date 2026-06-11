@@ -127,7 +127,7 @@ fetch → classify → prioritize → [draft → review → apply]* → summariz
 ## Resources
 
 - [Makers Agents Documentation](https://pages.edgeone.ai/document/agents)
-- [Quick Start: Agent Development](https://pages.edgeone.ai/document/agents-quickstart)
+- [Quick Start: Agent Development](https://pages.edgeone.ai/document/agents-quick-start)
 - [Makers Models](https://pages.edgeone.ai/document/models)
 
 ## License
