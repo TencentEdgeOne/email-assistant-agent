@@ -5,7 +5,7 @@ running — the unit tests already validate the mechanics offline.
 
 Usage:
     cd agents/email-assistant
-    pnpm dev &                     # start the local Pages dev server
+    pnpm dev &                     # start the local Makers dev server
     bash agents/email/tests/e2e_curl.sh
 
 Expected:

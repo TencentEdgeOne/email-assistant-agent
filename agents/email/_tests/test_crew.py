@@ -112,7 +112,7 @@ def _fake_llm():
     """
     from crewai import LLM
     return LLM(
-        model="@Pages/test-model",
+        model="@Makers/test-model",
         provider="openai",
         api_key="sk-test",
         base_url="https://example.invalid/v1",

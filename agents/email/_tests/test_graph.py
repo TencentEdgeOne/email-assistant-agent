@@ -458,7 +458,7 @@ def test_build_graph_compiles_with_in_memory_checkpointer():
         provider=FakeProvider(),
         llm=FakeLLM(),
         openai_client=FakeOpenAIClient(),
-        model="@Pages/test",
+        model="@Makers/test",
     )
     # If we got here without exception, the graph compiled successfully.
     # Verify the app exposes the expected interface.
@@ -477,7 +477,7 @@ def test_graph_runs_pipeline_through_summarize_with_no_inbox():
             provider=FakeProvider(),
             llm=None,
             openai_client=None,
-            model="@Pages/test",
+            model="@Makers/test",
         )
         config = {"configurable": {"thread_id": "t1"}}
         # No inbox → no classify call needed (classify guards), no draft loop.

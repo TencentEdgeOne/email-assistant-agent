@@ -262,7 +262,7 @@ def test_classify_parses_results_array():
     })
     state: dict = {"inbox": inbox}
     client = FakeOpenAIClient(canned)
-    result = asyncio.run(classify(state, openai_client=client, model="@Pages/test"))
+    result = asyncio.run(classify(state, openai_client=client, model="@Makers/test"))
     classified = result["classified"]
     assert len(classified) == 2
     assert classified[0].email.id == "m1"
@@ -270,7 +270,7 @@ def test_classify_parses_results_array():
     assert classified[0].priority == 95
     assert classified[1].category == "marketing"
     # The model was passed through
-    assert client.chat.completions.calls[0]["model"] == "@Pages/test"
+    assert client.chat.completions.calls[0]["model"] == "@Makers/test"
 
 
 def test_classify_tolerates_emails_key():

@@ -108,7 +108,7 @@ def build_graph(
         provider: ``EmailProvider`` instance (mock or imap).
         llm: CrewAI ``LLM`` for the draft sub-pipeline.
         openai_client: ``openai.AsyncOpenAI`` for classify / summarize nodes.
-        model: model id passed to chat.completions (e.g. ``@Pages/...``).
+        model: model id passed to chat.completions (e.g. ``@Makers/...``).
 
     Returns:
         A compiled LangGraph application ready for ``.astream(...)``.

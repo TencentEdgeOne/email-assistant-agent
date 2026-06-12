@@ -714,8 +714,7 @@ export default function App() {
             text:
               `⚠ 后端要求重审同一封邮件(${payload.email_id})。\n` +
               '通常意味着 LangGraph checkpointer 没持久化(本地 dev 默认 in-memory),\n' +
-              '每次请求新进程就丢了之前的状态。\n' +
-              '修复:把 PAGES_BLOB_LOCAL_PERSIST=1 加到环境变量,然后重启 dev server。',
+              '每次请求新进程就丢了之前的状态。'
           });
         }
         setPending({ draft: payload.draft, remaining: payload.remaining ?? 0 });

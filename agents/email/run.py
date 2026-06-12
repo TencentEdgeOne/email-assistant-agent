@@ -47,7 +47,7 @@ async def save_message(context, role: str, content: str, metadata: dict | None =
     """Append a message to the platform's conversation memory.
 
     All writes are best-effort. ``store.append_message`` is provided by the
-    EdgeOne Pages runtime; on local dev or when context.store is missing
+    EdgeOne Makers runtime; on local dev or when context.store is missing
     (e.g. early init failures), this no-ops.
     """
     store = getattr(context, "store", None)
